@@ -1,0 +1,53 @@
+.logo-box {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  margin-bottom: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--page);
+  padding: 10px;
+}
+.settings-preview .logo-box img {
+  width: auto;
+  max-width: 100%;
+  max-height: 84px;
+  height: auto;
+  border-radius: 8px;
+  object-fit: contain;
+  margin: 0;
+}
+.logo-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.logo-actions button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 9px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.logo-actions button:hover:not(:disabled) {
+  border-color: #e79d19;
+  color: #b6740c;
+}
+.logo-actions button.danger:hover:not(:disabled) {
+  border-color: #e35d70;
+  color: #c2394b;
+}
+.logo-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.logo-note {
+  margin: -6px 0 12px;
+  font-size: 10px;
+  color: var(--muted);
+}

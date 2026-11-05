@@ -2,7 +2,16 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { Permission, Role, User } from "../models.js";
 import { ADMIN_ROLE, auth, can, fmtUser, signToken, upload } from "../auth.js";
-import { HttpError, bad, h, isId } from "../utils.js";
+import {
+  HttpError,
+  bad,
+  h,
+  isId,
+  listPage,
+  pageOf,
+  rx,
+  searchOf,
+} from "../utils.js";
 
 const router = Router();
 const withRole = (q) =>
@@ -103,8 +112,19 @@ router.get(
   "/users",
   ...userGuard,
   h(async (req, res) => {
-    const rows = await withRole(User.find().sort({ createdAt: -1 }));
-    res.json({ data: rows.map((u) => fmtUser(req, u)) });
+    const f = {};
+    const term = searchOf(req.query);
+    if (term)
+      f.$or = ["name", "userId", "email", "mobile_number"].map((k) => ({
+        [k]: rx(term),
+      }));
+    if (isId(req.query.role)) f.role_id = req.query.role;
+    const out = await listPage(User, f, req, {
+      decorate: withRole,
+      map: (rows) => rows.map((u) => fmtUser(req, u)),
+    });
+    if (pageOf(req.query).paged) out.summary = { total: await User.countDocuments() };
+    res.json(out);
   }),
 );
 router.get(
@@ -190,9 +210,13 @@ router.get(
   "/roles",
   auth,
   can("roles-manage", "users-manage"),
-  h(async (_req, res) =>
-    res.json({ data: await Role.find().sort({ name: 1 }) }),
-  ),
+  h(async (req, res) => {
+    const term = searchOf(req.query);
+    const f = term ? { $or: [{ name: rx(term) }, { description: rx(term) }] } : {};
+    const out = await listPage(Role, f, req, { sort: { name: 1 } });
+    if (pageOf(req.query).paged) out.summary = { total: await Role.countDocuments() };
+    res.json(out);
+  }),
 );
 router.get(
   "/roles/:id",
@@ -275,9 +299,14 @@ router.get(
   "/permissions",
   auth,
   can("roles-manage"),
-  h(async (_req, res) =>
-    res.json({ data: await Permission.find().sort({ name: 1 }) }),
-  ),
+  h(async (req, res) => {
+    const term = searchOf(req.query);
+    const f = term ? { $or: [{ name: rx(term) }, { description: rx(term) }] } : {};
+    const out = await listPage(Permission, f, req, { sort: { name: 1 } });
+    if (pageOf(req.query).paged)
+      out.summary = { total: await Permission.countDocuments() };
+    res.json(out);
+  }),
 );
 router.post(
   "/permissions",

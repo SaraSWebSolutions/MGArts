@@ -1,11 +1,12 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/authContext";
+import { FullPageLoader } from "../components/Loaders";
 
 export default function PrivateRoute({ children }) {
   const { token, loading } = useAuth();
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <FullPageLoader />;
   }
 
   if (!token) {

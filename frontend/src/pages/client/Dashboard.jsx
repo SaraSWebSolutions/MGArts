@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight,
+  BarChart3,
   Coins,
   Gem,
   HandCoins,
   Hammer,
-  Plus,
   RefreshCw,
   Scale,
   Store,
@@ -18,6 +18,9 @@ import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
 import { dt, karat, money, wt } from "../../components/masterHelpers";
 import "./dashboard.css";
+import { Skeleton } from "../../components/Loaders";
+import Breadcrumb from "../../components/Breadcrumb";
+import "./QuickActions.css";
 
 const TXN = {
   receipt: "Customer gold received",
@@ -54,22 +57,30 @@ export default function ClientDashboard() {
   const [d, setD] = useState(null);
   const [pending, setPending] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [dashLoading, setDashLoading] = useState(true);
+  const [pendLoading, setPendLoading] = useState(true);
 
-  const load = async () => {
-    try {
-      const [dash, jobs] = await Promise.all([
-        fetchData("/dashboard"),
-        jobsApi.list({ status: "issued" }),
-      ]);
-      setD(dash.data);
-      setPending(jobs);
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to load dashboard"));
-    } finally {
-      setBusy(false);
-    }
+  // two independent requests: each section shows its own loader until its data arrives
+  const load = () => {
+    fetchData("/dashboard")
+      .then((r) => setD(r.data))
+      .catch((err) => toast.error(getErrorMessage(err, "Failed to load dashboard")))
+      .finally(() => {
+        setBusy(false);
+        setDashLoading(false);
+      });
+    jobsApi
+      .page({ status: "issued", page: 1, limit: 7 })
+      .then((r) => setPending(r.rows))
+      .catch((err) => toast.error(getErrorMessage(err, "Failed to load jobs")))
+      .finally(() => setPendLoading(false));
   };
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  const refresh = () => {
+    setBusy(true);
+    setDashLoading(true);
+    setPendLoading(true);
+    load();
+  };
   useEffect(() => {
     void Promise.resolve().then(load);
   }, []);
@@ -136,19 +147,14 @@ export default function ClientDashboard() {
   return (
     <div className="ppc-dashboard">
       <div className="dashboard-controls">
-        <span className="overview-caption">
-          GOLD & JEWELLERY <b>/</b> OVERVIEW
-        </span>
+        <Breadcrumb />
         <div className="dash-filters">
           <label>
             <RefreshCw size={16} className={busy ? "spin" : ""} />
             <select
               aria-label="Refresh"
               value=""
-              onChange={() => {
-                setBusy(true);
-                load();
-              }}
+              onChange={refresh}
             >
               <option value="">Refresh data</option>
               <option value="1">Refresh now</option>
@@ -177,7 +183,18 @@ export default function ClientDashboard() {
       <div className="modern-kpis">
         {kpis.map((k) => {
           const Icon = k.icon;
-          return (
+          return dashLoading ? (
+            <article className={`modern-kpi tone-${k.tone}`} key={k.label} aria-busy="true">
+              <div className="kpi-title">
+                <span className="metric-icon">
+                  <Icon size={21} />
+                </span>
+                <span>{k.label}</span>
+              </div>
+              <Skeleton width="60%" height={26} style={{ margin: "10px 0" }} />
+              <Skeleton width="45%" height={10} />
+            </article>
+          ) : (
             <article className={`modern-kpi tone-${k.tone}`} key={k.label}>
               <div className="kpi-title">
                 <span className="metric-icon">
@@ -203,6 +220,14 @@ export default function ClientDashboard() {
           className="production-chart-panel"
           action={<span className="soft-tag">Weekly</span>}
         >
+          {dashLoading ? (
+            <div aria-busy="true" style={{ display: "flex", alignItems: "flex-end", gap: 18, height: 210, padding: "20px 8px 0" }}>
+              {[60, 90, 45, 120, 80, 150, 100].map((h, i) => (
+                <Skeleton key={i} width="100%" height={h} style={{ borderRadius: 8 }} />
+              ))}
+            </div>
+          ) : (
+            <>
           <div className="legend">
             <span>
               <i className="legend-dot planned" />
@@ -246,12 +271,22 @@ export default function ClientDashboard() {
               </div>
             </div>
           </div>
+            </>
+          )}
         </Panel>
         <Panel
           title="Gold by Purity"
           subtitle="Raw gold in stock"
           className="order-status-panel"
         >
+          {dashLoading ? (
+            <div aria-busy="true" style={{ display: "grid", placeItems: "center", gap: 18, padding: "10px 0" }}>
+              <Skeleton width={150} height={150} style={{ borderRadius: "50%" }} />
+              <Skeleton width="80%" height={12} />
+              <Skeleton width="65%" height={12} />
+            </div>
+          ) : (
+            <>
           <div
             className="modern-donut"
             style={{ background: donut }}
@@ -278,12 +313,23 @@ export default function ClientDashboard() {
               </div>
             ))}
           </div>
+            </>
+          )}
         </Panel>
         <Panel
           title="Own vs Customer"
           subtitle="Stock held right now"
           className="performance-panel"
         >
+          {dashLoading ? (
+            <div aria-busy="true">
+              <Skeleton width="100%" height={14} />
+              <Skeleton width="100%" height={14} style={{ marginTop: 18 }} />
+              <Skeleton width="100%" height={14} style={{ marginTop: 18 }} />
+              <Skeleton width="70%" height={12} style={{ marginTop: 26 }} />
+            </div>
+          ) : (
+            <>
           <div className="performance-table-wrap">
             <table className="performance-table">
               <thead>
@@ -311,10 +357,12 @@ export default function ClientDashboard() {
             Sales last 30 days: <b>{money(x.sales30)}</b> ({x.salesCount30 ?? 0}{" "}
             bills) · Received: <b>{money(x.paid)}</b>
           </p>
+            </>
+          )}
         </Panel>
       </div>
 
-      <div className="operations-grid">
+      <div className="operations-grid ops-two">
         <Panel
           title="Gold With Workers"
           subtitle="Jobs waiting for jewellery"
@@ -337,14 +385,25 @@ export default function ClientDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {pending.length === 0 && (
+                {pendLoading &&
+                  [0, 1, 2, 3].map((i) => (
+                    <tr key={i} aria-hidden="true">
+                      {[0, 1, 2, 3, 4].map((c) => (
+                        <td key={c}>
+                          <Skeleton width={c === 0 ? "70%" : "55%"} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                {!pendLoading && pending.length === 0 && (
                   <tr>
                     <td colSpan={5} className="no-sample">
                       No pending jobs
                     </td>
                   </tr>
                 )}
-                {pending.slice(0, 7).map((j) => (
+                {!pendLoading &&
+                  pending.slice(0, 7).map((j) => (
                   <tr key={j.id}>
                     <td>{j.jobNo}</td>
                     <td>{j.worker?.name}</td>
@@ -363,10 +422,15 @@ export default function ClientDashboard() {
           className="notifications-panel"
         >
           <div className="modern-alerts">
-            {x.recent.length === 0 && (
+            {dashLoading &&
+              [0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} width="100%" height={38} style={{ marginBottom: 10, borderRadius: 10 }} />
+              ))}
+            {!dashLoading && x.recent.length === 0 && (
               <p className="empty-state">Nothing recorded yet</p>
             )}
-            {x.recent.slice(0, 5).map((e) => (
+            {!dashLoading &&
+              x.recent.slice(0, 5).map((e) => (
               <div
                 className={`modern-alert alert-${e.direction === "in" ? "success" : "warning"}`}
                 key={e.id}
@@ -386,39 +450,50 @@ export default function ClientDashboard() {
             ))}
           </div>
         </Panel>
-        <Panel
-          title="Quick Actions"
-          subtitle="Jump into your workflow"
-          className="quick-panel"
-        >
-          <div className="quick-grid">
-            {[
-              { label: "Receive Gold", icon: HandCoins, to: "/gold-receipts" },
-              { label: "Issue to Worker", icon: Hammer, to: "/jobs" },
-              { label: "Add Payment", icon: Wallet, to: "/billing" },
-              { label: "New Sale", icon: Store, to: "/sales" },
-            ].map((a, i) => {
-              const Icon = a.icon;
-              return (
-                <button
-                  className={`quick-action quick-${i}`}
-                  key={a.label}
-                  onClick={() => nav(a.to)}
-                >
-                  <Icon size={23} />
-                  <span>{a.label}</span>
-                </button>
-              );
-            })}
-          </div>
-          <button className="erp-button" onClick={() => nav("/reports")}>
-            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Plus size={18} /> Open Reports
-            </span>
-            <ArrowRight size={16} />
-          </button>
-        </Panel>
       </div>
+      <Panel
+        title="Quick Actions"
+        subtitle="Jump into your workflow"
+        className="quick-panel qa-wide"
+      >
+        <div className="qa-list">
+          {[
+            { label: "Receive Gold", sub: "Customer bar / old gold", icon: HandCoins, to: "/gold-receipts", c: "#e79d19" },
+            { label: "Issue to Worker", sub: "Start a job work", icon: Hammer, to: "/jobs", c: "#8766d7" },
+            { label: "Add Payment", sub: "Making charge received", icon: Wallet, to: "/billing", c: "#11ad84" },
+            { label: "New Sale", sub: "Sell own jewellery", icon: Store, to: "/sales", c: "#e58a34" },
+          ].map((a) => {
+            const Icon = a.icon;
+            return (
+              <button
+                className="qa-item"
+                style={{ "--c": a.c }}
+                key={a.label}
+                onClick={() => nav(a.to)}
+              >
+                <span className="qa-ico">
+                  <Icon size={19} />
+                </span>
+                <span className="qa-text">
+                  <strong>{a.label}</strong>
+                  <small>{a.sub}</small>
+                </span>
+                <ArrowRight size={15} className="qa-go" />
+              </button>
+            );
+          })}
+          <button className="qa-reports" onClick={() => nav("/reports")}>
+            <span className="qa-ico">
+              <BarChart3 size={19} />
+            </span>
+            <span className="qa-text">
+              <strong>Open Reports</strong>
+              <small>Reconciliation, stock, GST &amp; more</small>
+            </span>
+            <ArrowRight size={15} />
+          </button>
+        </div>
+      </Panel>
     </div>
   );
 }

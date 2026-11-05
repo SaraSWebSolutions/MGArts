@@ -1,19 +1,11 @@
 import { useState } from "react";
-import { Printer, Receipt, Search, Wallet } from "lucide-react";
+import { Printer, Receipt, Search, Wallet, Ban, Pencil, Calculator } from "lucide-react";
 import toast from "react-hot-toast";
 import { jobsApi, paymentsApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-  Tabs,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, Tabs, ActionBtn } from "../../components/MasterUI";
 import {
   dt,
   isActive,
@@ -22,7 +14,9 @@ import {
   wt,
 } from "../../components/masterHelpers";
 import PrintDoc from "../../components/PrintDoc";
+import Pagination from "../../components/Pagination";
 import TaxPicker from "../../components/TaxPicker";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const PAY = {
@@ -43,21 +37,27 @@ export default function Billing() {
   const { can } = useAuth();
   const { taxRates } = useMasters();
   const [tab, setTab] = useState("jobs");
-  const jobs = useList(() => jobsApi.list({ owner: "customer" }), []);
-  const pays = useList(() => paymentsApi.list(), []);
+  // both tabs are paginated by the backend; the summary cards come from the jobs response
+  const jobs = usePaged(
+    (p) =>
+      jobsApi.page({
+        owner: "customer",
+        exclude: "cancelled",
+        billing: "1",
+        ...p,
+      }),
+    [],
+  );
+  const pays = usePaged((p) => paymentsApi.page(p), []);
+  const cur = tab === "jobs" ? jobs : pays; // the table that is on screen
   const [charge, setCharge] = useState(null);
   const [pay, setPay] = useState(null);
   const [doc, setDoc] = useState(null); // { type, data }
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState("");
   const reloadAll = () => {
     jobs.reload();
     pays.reload();
   };
-
-  const list = jobs.rows.filter((j) => j.status !== "cancelled");
-  const billed = list.reduce((s, j) => s + (j.totalCharge || 0), 0);
-  const paid = list.reduce((s, j) => s + (j.paid || 0), 0);
 
   const openCharge = (j) => {
     const saved = j.taxes?.length
@@ -71,6 +71,8 @@ export default function Billing() {
       job: j,
       makingChargeType: j.makingChargeType || "per_gram",
       makingChargeValue: j.makingChargeValue || "",
+      offerType: j.offerType || "amount",
+      offerValue: j.offerValue || "",
       taxRates: saved,
     });
   };
@@ -83,13 +85,24 @@ export default function Billing() {
       : Number(charge.makingChargeValue) || 0
     : 0;
 
+  const offerTyped = Number(charge?.offerValue) || 0;
+  const offer = charge
+    ? Math.min(
+        charge.offerType === "percent"
+          ? Math.round(making * offerTyped) / 100
+          : offerTyped,
+        making,
+      )
+    : 0;
+  const taxable = making - offer;
+
   const taxLines = charge
     ? taxRates
         .filter((t) => charge.taxRates.includes(t.id))
         .map((t) => ({
           name: t.name,
           rate: t.rate,
-          amount: Math.round(making * t.rate) / 100,
+          amount: Math.round(taxable * t.rate) / 100,
         }))
     : [];
   const taxTotal = taxLines.reduce((s, t) => s + t.amount, 0);
@@ -101,6 +114,8 @@ export default function Billing() {
       await jobsApi.setCharges(charge.job.id, {
         makingChargeType: charge.makingChargeType,
         makingChargeValue: Number(charge.makingChargeValue),
+        offerType: charge.offerType,
+        offerValue: Number(charge.offerValue) || 0,
         taxRates: charge.taxRates,
       });
       toast.success("Making charge saved");
@@ -140,20 +155,11 @@ export default function Billing() {
       reloadAll();
   };
 
-  const shownJobs = list.filter((j) =>
-    `${j.jobNo}${j.invoiceNo}${j.customer?.name}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
-  );
-  const shownPays = pays.rows.filter((p) =>
-    `${p.receiptNo}${p.customer?.name}`.toLowerCase().includes(q.toLowerCase()),
-  );
-
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / BILLING</span>
+          <Breadcrumb />
           <h1>Billing & Payments</h1>
           <p>
             Customers pay only the making charge (plus GST). Set the charge per
@@ -164,12 +170,28 @@ export default function Billing() {
       <div className="master-stats">
         <Stat
           icon={Receipt}
-          value={list.filter((j) => j.invoiceNo).length}
+          loading={!jobs.summary}
+          value={jobs.summary?.invoices ?? 0}
           label="Invoices"
         />
-        <Stat icon={Receipt} value={money(billed)} label="Billed (incl. GST)" />
-        <Stat icon={Wallet} value={money(paid)} label="Received" />
-        <Stat icon={Wallet} value={money(billed - paid)} label="Outstanding" />
+        <Stat
+          icon={Receipt}
+          loading={!jobs.summary}
+          value={money(jobs.summary?.billed)}
+          label="Billed (incl. GST)"
+        />
+        <Stat
+          icon={Wallet}
+          loading={!jobs.summary}
+          value={money(jobs.summary?.paid)}
+          label="Received"
+        />
+        <Stat
+          icon={Wallet}
+          loading={!jobs.summary}
+          value={money(jobs.summary?.outstanding)}
+          label="Outstanding"
+        />
       </div>
       <Tabs
         value={tab}
@@ -185,8 +207,11 @@ export default function Billing() {
             <Search size={15} />
             <input
               placeholder="Search..."
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
+              value={cur.q}
+              onChange={(e) => {
+                jobs.setQ(e.target.value); // one search box for both tabs
+                pays.setQ(e.target.value);
+              }}
             />
           </div>
         </div>
@@ -203,14 +228,19 @@ export default function Billing() {
                   <th className="num">Total</th>
                   <th className="num">Balance</th>
                   <th>Status</th>
+                  <th>Payment</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {shownJobs.length === 0 && (
-                  <EmptyRow colSpan={9} loading={jobs.loading} />
+                {jobs.rows.length === 0 && (
+                  <EmptyRow
+                    colSpan={10}
+                    loading={jobs.loading}
+                    rows={jobs.limit}
+                  />
                 )}
-                {shownJobs.map((j) => (
+                {jobs.rows.map((j) => (
                   <tr key={j.id}>
                     <td>
                       <div className="name-cell">
@@ -229,6 +259,9 @@ export default function Billing() {
                     </td>
                     <td className="num">
                       {j.invoiceNo ? money(j.makingCharge) : "—"}
+                      {j.offerAmount > 0 && (
+                        <span className="sub">Offer − {money(j.offerAmount)}</span>
+                      )}
                     </td>
                     <td className="num">
                       {j.invoiceNo ? (
@@ -256,36 +289,37 @@ export default function Billing() {
                       </Badge>
                     </td>
                     <td>
-                      <div
-                        className="action-buttons"
-                        style={{ flexWrap: "wrap" }}
-                      >
-                        {can("billing-manage") && (
-                          <button
-                            className="act-text"
-                            onClick={() => openCharge(j)}
-                          >
-                            {j.invoiceNo ? "Edit charge" : "Set charge"}
-                          </button>
-                        )}
-                        {can("billing-manage") &&
-                          j.invoiceNo &&
-                          j.balance > 0.004 && (
-                            <button
-                              className="act-text"
-                              onClick={() =>
-                                setPay({
+                      {can("billing-manage") &&
+                      j.invoiceNo &&
+                      j.balance > 0.004 ? (
+                        <ActionBtn
+                          icon={Wallet}
+                          label="Add payment"
+                          onClick={() =>
+                            setPay({
                                   job: j,
                                   amount: j.balance,
                                   mode: "cash",
                                   date: today(),
                                   notes: "",
                                 })
-                              }
-                            >
-                              + Payment
-                            </button>
-                          )}
+                          }
+                        />
+                      ) : (
+                        <span className="sub" style={{ margin: 0 }}>
+                          {j.invoiceNo ? "Settled" : "—"}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <div
+                        className="action-buttons"
+                        style={{ flexWrap: "wrap" }}
+                      >
+                        {can("billing-manage") && (
+                          <ActionBtn icon={j.invoiceNo ? Pencil : Calculator} label={j.invoiceNo ? "Edit charge" : "Set making charge"} onClick={() => openCharge(j)} />
+                        )}
+                        
                         {j.invoiceNo && (
                           <button
                             className="icon-square"
@@ -315,10 +349,14 @@ export default function Billing() {
                 </tr>
               </thead>
               <tbody>
-                {shownPays.length === 0 && (
-                  <EmptyRow colSpan={7} loading={pays.loading} />
+                {pays.rows.length === 0 && (
+                  <EmptyRow
+                    colSpan={7}
+                    loading={pays.loading}
+                    rows={pays.limit}
+                  />
                 )}
-                {shownPays.map((p) => (
+                {pays.rows.map((p) => (
                   <tr key={p.id}>
                     <td>
                       <div className="name-cell">
@@ -355,12 +393,7 @@ export default function Billing() {
                           <Printer size={14} />
                         </button>
                         {can("billing-manage") && p.status === "active" && (
-                          <button
-                            className="act-text red"
-                            onClick={() => voidPay(p)}
-                          >
-                            Void
-                          </button>
+                          <ActionBtn icon={Ban} label="Void payment" tone="danger" onClick={() => voidPay(p)} />
                         )}
                       </div>
                     </td>
@@ -370,9 +403,14 @@ export default function Billing() {
             </table>
           )}
         </div>
-        <div className="master-footer">
-          {tab === "jobs" ? shownJobs.length : shownPays.length} records
-        </div>
+        <Pagination
+          meta={cur.meta}
+          loading={cur.loading}
+          limit={cur.limit}
+          onPage={cur.setPage}
+          onLimit={cur.setLimit}
+          label={tab === "jobs" ? "jobs" : "receipts"}
+        />
       </section>
 
       {charge && (
@@ -413,15 +451,49 @@ export default function Billing() {
             value={charge.taxRates}
             onChange={(v) => setCharge({ ...charge, taxRates: v })}
           />
+          <CSelect
+            label="Offer / discount (optional)"
+            value={charge.offerType}
+            onChange={(v) => setCharge({ ...charge, offerType: v })}
+            options={[
+              { value: "amount", label: "Amount (₹)" },
+              { value: "percent", label: "Percentage (%)" },
+            ]}
+          />
+          <CField
+            label={
+              charge.offerType === "percent" ? "Offer percentage (%)" : "Offer amount (₹)"
+            }
+            type="number"
+            step="0.01"
+            value={charge.offerValue}
+            onChange={(v) => setCharge({ ...charge, offerValue: v })}
+            placeholder="0"
+          />
           <div className="calc-box">
             <div>
               <span>Weight used</span>
               <strong>{wt(basis)}</strong>
             </div>
             <div>
-              <span>Making</span>
+              <span>Making charge</span>
               <strong>{money(making)}</strong>
             </div>
+            {offer > 0 && (
+              <>
+                <div>
+                  <span>
+                    Offer
+                    {charge.offerType === "percent" ? ` ${offerTyped}%` : ""}
+                  </span>
+                  <strong>− {money(offer)}</strong>
+                </div>
+                <div>
+                  <span>Taxable value</span>
+                  <strong>{money(taxable)}</strong>
+                </div>
+              </>
+            )}
             {taxLines.map((t) => (
               <div key={t.name}>
                 <span>
@@ -432,7 +504,7 @@ export default function Billing() {
             ))}
             <div>
               <span>Total</span>
-              <strong>{money(making + taxTotal)}</strong>
+              <strong>{money(taxable + taxTotal)}</strong>
             </div>
           </div>
           {!charge.job.finishedWeight && (

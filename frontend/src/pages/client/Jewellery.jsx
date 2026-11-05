@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Gem, Pencil, Scale, Search } from "lucide-react";
+import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { jewelleryApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { useList } from "../../hooks";
+import { usePaged } from "../../hooks";
 import {
   Badge,
   CField,
@@ -14,6 +15,8 @@ import {
   Tabs,
 } from "../../components/MasterUI";
 import { clean, dt, karat, wt } from "../../components/masterHelpers";
+import Pagination from "../../components/Pagination";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const ST = {
@@ -31,12 +34,19 @@ export default function Jewellery() {
     product: "",
     location: "",
   });
-  const { rows, loading, reload } = useList(
-    () => jewelleryApi.list(clean(f)),
-    [f],
-  );
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => jewelleryApi.page({ ...clean(f), ...p }), [f]);
   const [edit, setEdit] = useState(null);
-  const [q, setQ] = useState("");
   const [saving, setSaving] = useState(false);
 
   const save = async (e) => {
@@ -57,49 +67,19 @@ export default function Jewellery() {
       setSaving(false);
     }
   };
-  const shown = rows.filter((r) =>
-    `${r.tag}${r.name}${r.product}${r.customer?.name || ""}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
-  );
-  const products = [...new Set(rows.map((r) => r.product))];
-  // keep every product / location seen so the dropdowns do not shrink after filtering
-  const known = useMemo(
-    () => ({
-      products: [...new Set(rows.map((r) => r.product).filter(Boolean))].sort(),
-      locations: [...new Set(rows.map((r) => r.location).filter(Boolean))].sort(),
-    }),
-    [rows],
-  );
-  // classification: owner > purity > product
-  const groups = useMemo(() => {
-    const m = {};
-    shown.forEach((r) => {
-      const k = `${r.owner}|${r.customer?.name || ""}|${r.purity}|${r.product}`;
-      const g = (m[k] ||= {
-        owner: r.owner,
-        customer: r.customer?.name || "",
-        purity: r.purity,
-        product: r.product,
-        pieces: 0,
-        weight: 0,
-      });
-      g.pieces += 1;
-      g.weight += r.weight;
-    });
-    return Object.values(m).sort(
-      (a, b) =>
-        a.owner.localeCompare(b.owner) ||
-        b.purity - a.purity ||
-        a.product.localeCompare(b.product),
-    );
-  }, [shown]);
+  // totals, dropdown values and the classification summary are calculated by the
+  // backend for the whole filtered stock (not just the page on screen)
+  const known = {
+    products: summary?.products ?? [],
+    locations: summary?.locations ?? [],
+  };
+  const groups = summary?.groups ?? [];
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">STOCK / JEWELLERY</span>
+          <Breadcrumb />
           <h1>Jewellery Stock</h1>
           <p>
             Finished pieces classified by product, purity and owner. Own
@@ -107,14 +87,45 @@ export default function Jewellery() {
           </p>
         </div>
       </header>
+      <div className="info-banner">
+        {f.owner !== "own" ? (
+          <>
+            <strong>What is customer jewellery?</strong> Finished pieces made
+            from a customer&apos;s own gold. They are not yours until
+            delivered. To add: go to <Link to="/jobs">Job Work</Link>, issue the
+            customer&apos;s gold to a worker, then click <b>Receive jewellery</b>{" "}
+            when the pieces come back. Deliver them to the customer from the same
+            page.
+          </>
+        ) : (
+          <>
+            <strong>What is own jewellery?</strong> Pieces that belong to your
+            shop. To add: use{" "}
+            <Link to="/purchases">Add Own Stock → Ready jewellery</Link>, or
+            receive an Own job in <Link to="/jobs">Job Work</Link>. Sell them
+            from <Link to="/sales">Own Sales</Link>.
+          </>
+        )}
+      </div>
       <div className="master-stats">
-        <Stat icon={Gem} value={shown.length} label="Pieces" />
+        <Stat
+          icon={Gem}
+          loading={!summary}
+          value={summary?.pieces ?? 0}
+          label="Pieces"
+        />
         <Stat
           icon={Scale}
-          value={wt(shown.reduce((s, r) => s + r.weight, 0))}
+          loading={!summary}
+          value={wt(summary?.weight)}
           label="Total Weight"
         />
-        <Stat icon={Gem} value={products.length} label="Product Types" />
+        <Stat
+          icon={Gem}
+          loading={!summary}
+          value={summary?.productTypes ?? 0}
+          label="Product Types"
+        />
       </div>
       <Tabs
         value={f.owner}
@@ -194,8 +205,10 @@ export default function Jewellery() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={8} loading={loading} />}
-              {shown.map((r) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={8} loading={loading} rows={limit} />
+              )}
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -250,7 +263,14 @@ export default function Jewellery() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} pieces</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="pieces"
+        />
       </section>
       {groups.length > 0 && (
         <section className="master-card">

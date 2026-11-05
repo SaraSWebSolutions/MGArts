@@ -1,0 +1,113 @@
+/* Dashboard: 2 panels above, Quick Actions full width with all 5 tiles in one row */
+.operations-grid.ops-two {
+  grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr);
+}
+.qa-wide {
+  margin-top: 12px;
+}
+.qa-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.qa-item,
+.qa-reports {
+  --c: #e79d19;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  min-height: 118px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+  border-radius: 14px;
+  transition:
+    transform 0.18s,
+    box-shadow 0.18s;
+}
+.qa-item {
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--c);
+  background: var(--surface);
+  color: var(--ink);
+}
+.qa-item:hover,
+.qa-reports:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px #14213d1c;
+}
+.qa-ico {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+.qa-text {
+  flex: 1;
+  min-width: 0;
+}
+.qa-text strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.qa-text small {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.qa-go {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  color: var(--muted);
+  transition:
+    transform 0.18s,
+    color 0.18s;
+}
+.qa-item:hover .qa-go {
+  color: var(--c);
+  transform: translateX(3px);
+}
+.qa-reports {
+  border: 0;
+  color: #fff;
+  background: linear-gradient(135deg, #27324a, #3b2f1c 60%, #c77c0c);
+  box-shadow: 0 8px 20px #27324a33;
+}
+.qa-reports .qa-ico {
+  background: #ffffff22;
+  color: #ffd98f;
+}
+.qa-reports .qa-text small {
+  color: #ffffffb3;
+}
+.qa-reports > svg {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+@media (max-width: 1180px) {
+  .qa-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 960px) {
+  .operations-grid.ops-two {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .qa-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

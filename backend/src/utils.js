@@ -64,3 +64,85 @@ export async function dupGuard(Model, filter) {
       "Duplicate entry blocked: the same details were already saved a moment ago.",
     );
 }
+
+/* ---------- pagination (server side) ----------
+ * Opt-in: a list endpoint is paginated only when the request has ?page=.
+ * Without it the endpoint still returns the plain list, so dropdowns that need
+ * every record (customers, workers, tax rates ...) keep working.
+ *   GET /customers?page=2&limit=10&search=raj
+ *   -> { data: [...], meta: { page, limit, total, pages, from, to }, summary? }
+ */
+export const rx = (s) =>
+  new RegExp(String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+
+export function pageOf(q = {}) {
+  const paged = q.page !== undefined && q.page !== "" && q.all !== "1";
+  const limit = Math.min(Math.max(parseInt(q.limit, 10) || 10, 1), 100);
+  const page = Math.max(parseInt(q.page, 10) || 1, 1);
+  return { paged, page, limit, skip: (page - 1) * limit };
+}
+
+export const metaOf = (total, page, limit) => ({
+  page,
+  limit,
+  total,
+  pages: Math.max(Math.ceil(total / limit), 1),
+  from: total ? (page - 1) * limit + 1 : 0,
+  to: Math.min(page * limit, total),
+});
+
+/** search text typed in the UI (?search=) */
+export const searchOf = (q = {}) => String(q.search || "").trim();
+
+/**
+ * find + count in one go.
+ * decorate(query) adds populate(); map(rows) post-processes the page of rows.
+ * Not paged -> behaves like the old endpoints (legacyLimit rows, 0 = no limit).
+ */
+export async function listPage(
+  Model,
+  filter,
+  req,
+  { sort = { createdAt: -1 }, decorate, map, legacyLimit = 0 } = {},
+) {
+  const p = pageOf(req.query);
+  const build = () => {
+    const qr = Model.find(filter).sort(sort);
+    return decorate ? decorate(qr) : qr;
+  };
+  if (!p.paged) {
+    const rows = await build().limit(legacyLimit);
+    return { data: map ? await map(rows) : rows };
+  }
+  const total = await Model.countDocuments(filter);
+  const pages = Math.max(Math.ceil(total / p.limit), 1);
+  const page = Math.min(p.page, pages); // asked past the last page (e.g. after deleting) -> last page
+  const rows = await build()
+    .skip((page - 1) * p.limit)
+    .limit(p.limit);
+  return {
+    data: map ? await map(rows) : rows,
+    meta: metaOf(total, page, p.limit),
+  };
+}
+
+/** same idea for rows that were already calculated in memory (reports) */
+export function pageRows(rows, q = {}) {
+  const p = pageOf(q);
+  if (!p.paged) return { rows };
+  const pages = Math.max(Math.ceil(rows.length / p.limit), 1);
+  const page = Math.min(p.page, pages);
+  return {
+    rows: rows.slice((page - 1) * p.limit, page * p.limit),
+    meta: metaOf(rows.length, page, p.limit),
+  };
+}
+
+/** $group helper that returns a single plain object (or zeros when nothing matches) */
+export async function totals(Model, filter, group) {
+  const [r] = await Model.aggregate([
+    { $match: filter },
+    { $group: { _id: null, ...group } },
+  ]);
+  return r || {};
+}

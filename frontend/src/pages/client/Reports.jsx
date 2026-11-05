@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Download } from "lucide-react";
 import toast from "react-hot-toast";
 import { fetchData } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
-import { useSettings } from "../../hooks";
+import { usePaged, useSettings } from "../../hooks";
 import { EmptyRow, Tabs } from "../../components/MasterUI";
+import { Skeleton } from "../../components/Loaders";
+import Pagination from "../../components/Pagination";
 import { clean, dt, money, wt } from "../../components/masterHelpers";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const TABS = [
@@ -51,64 +54,83 @@ const fmt = (type, v) =>
 export default function Reports() {
   const [tab, setTab] = useState("reconciliation");
   const [f, setF] = useState({ from: "", to: "", owner: "" });
-  const [rep, setRep] = useState({ columns: [], rows: [], totals: null });
-  const [extra, setExtra] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const { settings } = useSettings();
 
-  useEffect(() => {
-    let alive = true;
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    fetchData(`/reports/${tab}`, clean(f))
-      .then((r) => {
-        if (alive) {
-          setRep(r.data);
-          setExtra(r.extra || null);
-        }
-      })
-      .catch((e) => toast.error(getErrorMessage(e, "Failed to load report")))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [tab, f]);
+  // every report is paginated by the backend; totals & extra cards cover the whole report
+  const {
+    rows,
+    meta,
+    summary: rep,
+    loading,
+    setPage,
+    limit,
+    setLimit,
+  } = usePaged(
+    async (p) => {
+      const r = await fetchData(`/reports/${tab}`, { ...clean(f), ...p });
+      return {
+        rows: r.data.rows,
+        meta: r.meta ?? null,
+        summary: {
+          tab,
+          columns: r.data.columns,
+          totals: r.data.totals,
+          extra: r.extra || null,
+        },
+      };
+    },
+    [tab, f],
+  );
+  const columns = rep?.tab === tab ? rep.columns : []; // never show the previous tab's headings
+  const extra = !loading && rep?.tab === tab ? rep.extra : null;
+  const totals = rep?.tab === tab ? rep.totals : null;
 
-  const exportCsv = () => {
-    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = [rep.columns.map((c) => esc(c.label)).join(",")];
-    rep.rows.forEach((r) =>
-      lines.push(
-        rep.columns
-          .map((c) => esc(c.type === "date" ? dt(r[c.key]) : r[c.key]))
-          .join(","),
-      ),
-    );
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const a = Object.assign(document.createElement("a"), {
-      href: URL.createObjectURL(blob),
-      download: `${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
-    });
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const r = await fetchData(`/reports/${tab}`, { ...clean(f), all: "1" }); // every row, not just this page
+      const cols = r.data.columns;
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = [cols.map((c) => esc(c.label)).join(",")];
+      r.data.rows.forEach((row) =>
+        lines.push(
+          cols
+            .map((c) => esc(c.type === "date" ? dt(row[c.key]) : row[c.key]))
+            .join(","),
+        ),
+      );
+      const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+      const a = Object.assign(document.createElement("a"), {
+        href: URL.createObjectURL(blob),
+        download: `${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      toast.error(getErrorMessage(e, "Failed to export"));
+    } finally {
+      setExporting(false);
+    }
   };
   const alertPct = settings?.wastageAlertPercent;
   const dated = ["reconciliation", "making-gst"].includes(tab);
-  const meta = TABS.find((t) => t.value === tab);
+  const tabMeta = TABS.find((t) => t.value === tab);
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">REPORTS</span>
+          <Breadcrumb />
           <h1>Reports</h1>
-          <p>{meta.note}</p>
+          <p>{tabMeta.note}</p>
         </div>
         <button
           className="primary-btn"
           onClick={exportCsv}
-          disabled={!rep.rows.length}
+          disabled={!rows.length || exporting}
         >
-          <Download size={16} /> Export CSV
+          <Download size={16} /> {exporting ? "Exporting..." : "Export CSV"}
         </button>
       </header>
       <Tabs value={tab} onChange={setTab} items={TABS} />
@@ -145,6 +167,16 @@ export default function Reports() {
             </div>
           </div>
         )}
+        {tab === "own-stock" && loading && (
+          <div className="ledger-sum" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i}>
+                <Skeleton width={90} height={10} />
+                <Skeleton width={110} height={14} style={{ marginTop: 9 }} />
+              </div>
+            ))}
+          </div>
+        )}
         {extra && (
           <div className="ledger-sum">
             <div>
@@ -169,7 +201,7 @@ export default function Reports() {
           <table className="master-table" style={{ minWidth: 860 }}>
             <thead>
               <tr>
-                {rep.columns.map((c) => (
+                {columns.map((c) => (
                   <th
                     key={c.key}
                     className={
@@ -182,12 +214,16 @@ export default function Reports() {
               </tr>
             </thead>
             <tbody>
-              {rep.rows.length === 0 && (
-                <EmptyRow colSpan={rep.columns.length || 1} loading={loading} />
+              {rows.length === 0 && (
+                <EmptyRow
+                  colSpan={columns.length || 6}
+                  loading={loading}
+                  rows={limit}
+                />
               )}
-              {rep.rows.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id || JSON.stringify(r)}>
-                  {rep.columns.map((c) => {
+                  {columns.map((c) => {
                     const hot =
                       tab === "reconciliation" &&
                       c.key === "wastagePct" &&
@@ -212,17 +248,17 @@ export default function Reports() {
                 </tr>
               ))}
             </tbody>
-            {rep.totals && rep.rows.length > 0 && (
+            {totals && !loading && rows.length > 0 && (
               <tfoot>
                 <tr>
-                  {rep.columns.map((c) => (
+                  {columns.map((c) => (
                     <td
                       key={c.key}
                       className={
                         ["wt", "money", "pct"].includes(c.type) ? "num" : ""
                       }
                     >
-                      {fmt(c.type, rep.totals[c.key])}
+                      {fmt(c.type, totals[c.key])}
                     </td>
                   ))}
                 </tr>
@@ -230,12 +266,19 @@ export default function Reports() {
             )}
           </table>
         </div>
-        <div className="master-footer">
-          {rep.rows.length} rows
-          {tab === "reconciliation" && alertPct
-            ? ` · wastage above ${alertPct}% is highlighted`
-            : ""}
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="rows"
+        />
+        {tab === "reconciliation" && alertPct ? (
+          <div className="master-footer">
+            Wastage above {alertPct}% is highlighted. Totals cover all pages.
+          </div>
+        ) : null}
       </section>
     </div>
   );

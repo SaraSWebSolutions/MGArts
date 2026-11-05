@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Scale } from "lucide-react";
 import toast from "react-hot-toast";
 import { fetchData } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
-import { useMasters } from "../../hooks";
+import { usePaged, useMasters } from "../../hooks";
 import { Badge, EmptyRow, Tabs } from "../../components/MasterUI";
+import { Skeleton } from "../../components/Loaders";
+import Pagination from "../../components/Pagination";
 import { clean, dt, karat, opts, wt } from "../../components/masterHelpers";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
+import "./StockCards.css";
 
 const TXN = {
   receipt: "Customer receipt",
@@ -32,32 +35,40 @@ export default function Stock() {
     from: "",
     to: "",
   });
+  // 1) balance cards - own request, own loader
   const [bal, setBal] = useState([]);
-  const [led, setLed] = useState({ data: [], summary: null });
-  const [loading, setLoading] = useState(true);
-
+  const [balLoading, setBalLoading] = useState(true);
   useEffect(() => {
     let alive = true;
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    Promise.all([
-      fetchData(
-        "/stock/balances",
-        clean({ owner: f.owner, customer: f.customer, item: f.item }),
-      ),
-      fetchData("/stock/ledger", clean(f)),
-    ])
-      .then(([b, l]) => {
-        if (alive) {
-          setBal(b.data);
-          setLed(l);
-        }
-      })
-      .catch((e) => toast.error(getErrorMessage(e, "Failed to load stock")))
-      .finally(() => alive && setLoading(false));
+    setBalLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
+    fetchData(
+      "/stock/balances",
+      clean({ owner: f.owner, customer: f.customer, item: f.item }),
+    )
+      .then((b) => alive && setBal(b.data))
+      .catch((e) => toast.error(getErrorMessage(e, "Failed to load balances")))
+      .finally(() => alive && setBalLoading(false));
     return () => {
       alive = false;
     };
-  }, [f]);
+  }, [f.owner, f.customer, f.item]);
+
+  // 2) ledger table + its totals - paginated by the backend
+  const {
+    rows,
+    meta,
+    summary: sum,
+    loading,
+    setPage,
+    limit,
+    setLimit,
+  } = usePaged(
+    async (p) => {
+      const r = await fetchData("/stock/ledger", { ...clean(f), ...p });
+      return { rows: r.data, meta: r.meta ?? null, summary: r.summary ?? null };
+    },
+    [f],
+  );
 
   const set = (k, v) =>
     setF((p) => ({
@@ -65,13 +76,12 @@ export default function Stock() {
       [k]: v,
       ...(k === "owner" && v !== "customer" ? { customer: "" } : {}),
     }));
-  const sum = led.summary;
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">STOCK / LEDGER</span>
+          <Breadcrumb />
           <h1>Stock Ledger</h1>
           <p>
             Every gram in and out. Own stock and customer stock are always kept
@@ -89,31 +99,48 @@ export default function Stock() {
         ]}
       />
       <div className="balance-grid">
-        {bal.filter((b) => b.balance !== 0).length === 0 && !loading && (
+        {balLoading &&
+          [0, 1, 2].map((i) => (
+            <div className="bal-card" key={i} aria-busy="true">
+              <Skeleton width="55%" height={10} />
+              <Skeleton width="42%" height={22} style={{ margin: "12px 0" }} />
+              <Skeleton width="78%" height={10} />
+            </div>
+          ))}
+        {!balLoading && bal.filter((b) => b.balance !== 0).length === 0 && (
           <div className="master-note" style={{ gridColumn: "1/-1" }}>
             No stock balance yet.
           </div>
         )}
-        {bal
-          .filter((b) => b.balance !== 0)
-          .map((b) => (
-            <div
-              className="bal-card"
-              key={`${b.owner}${b.customer}${b.item}${b.purity}`}
-            >
-              <small>
-                {b.owner === "own"
-                  ? "OWN"
-                  : (b.customerName || "CUSTOMER").toUpperCase()}{" "}
-                · {b.item === "gold" ? "RAW GOLD" : "JEWELLERY"}
-              </small>
-              <strong>{wt(b.balance)}</strong>
-              <span>
-                {karat(b.purity)} · {b.purity} purity · fine{" "}
-                {wt((b.balance * b.purity) / 1000)}
-              </span>
-            </div>
-          ))}
+        {!balLoading &&
+          bal
+            .filter((b) => b.balance !== 0)
+            .map((b) => (
+              <div
+                className={`bal-card ${
+                  b.owner === "own"
+                    ? b.item === "gold"
+                      ? "st-amber"
+                      : "st-green"
+                    : b.item === "gold"
+                      ? "st-blue"
+                      : "st-purple"
+                }`}
+                key={`${b.owner}${b.customer}${b.item}${b.purity}`}
+              >
+                <small>
+                  {b.owner === "own"
+                    ? "OWN"
+                    : (b.customerName || "CUSTOMER").toUpperCase()}{" "}
+                  · {b.item === "gold" ? "RAW GOLD" : "JEWELLERY"}
+                </small>
+                <strong>{wt(b.balance)}</strong>
+                <span>
+                  {karat(b.purity)} · {b.purity} purity · fine{" "}
+                  {wt((b.balance * b.purity) / 1000)}
+                </span>
+              </div>
+            ))}
       </div>
       <section className="master-card">
         <div className="master-toolbar" style={{ flexWrap: "wrap" }}>
@@ -164,34 +191,49 @@ export default function Stock() {
             />
           </div>
         </div>
-        {sum && (
-          <div className="ledger-sum">
-            {[
-              ["Opening", "opening"],
-              ["Received", "in"],
-              ["Issued / out", "out"],
-              ["Closing", "closing"],
-            ].map(([l, k]) => (
-              <div key={k}>
-                <span>{l}</span>
-                <strong>Gold {wt(sum.gold[k])}</strong>
-                <span>Jewellery {wt(sum.jewellery[k])}</span>
+        {loading || !sum ? (
+          <div className="ledger-sum" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i}>
+                <Skeleton width={60} height={10} />
+                <Skeleton width={110} height={14} style={{ margin: "9px 0" }} />
+                <Skeleton width={90} height={10} />
               </div>
             ))}
           </div>
-        )}
-        {sum?.byType?.length > 0 && (
-          <div className="ledger-sum" style={{ flexWrap: "wrap" }}>
-            {sum.byType.map((b) => (
-              <div key={`${b.txnType}${b.direction}`}>
-                <span>
-                  {TXN[b.txnType] || b.txnType} (
-                  {b.direction === "in" ? "in" : "out"})
-                </span>
-                <strong>{wt(b.weight)}</strong>
+        ) : (
+          <>
+            <div className="ledger-sum">
+              {[
+                ["Opening", "opening"],
+                ["Received", "in"],
+                ["Issued / out", "out"],
+                ["Closing", "closing"],
+              ].map(([l, k]) => (
+                <div
+                  key={k}
+                  className={`sum-card ${{ opening: "st-blue", in: "st-green", out: "st-amber", closing: "st-purple" }[k]}`}
+                >
+                  <span>{l}</span>
+                  <strong>Gold {wt(sum.gold[k])}</strong>
+                  <span>Jewellery {wt(sum.jewellery[k])}</span>
+                </div>
+              ))}
+            </div>
+            {sum.byType?.length > 0 && (
+              <div className="ledger-sum" style={{ flexWrap: "wrap" }}>
+                {sum.byType.map((b) => (
+                  <div key={`${b.txnType}${b.direction}`}>
+                    <span>
+                      {TXN[b.txnType] || b.txnType} (
+                      {b.direction === "in" ? "in" : "out"})
+                    </span>
+                    <strong>{wt(b.weight)}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
         <div className="master-table-wrap">
           <table className="master-table" style={{ minWidth: 900 }}>
@@ -207,10 +249,10 @@ export default function Stock() {
               </tr>
             </thead>
             <tbody>
-              {led.data.length === 0 && (
-                <EmptyRow colSpan={7} loading={loading} />
+              {rows.length === 0 && (
+                <EmptyRow colSpan={7} loading={loading} rows={limit} />
               )}
-              {led.data.map((e) => (
+              {rows.map((e) => (
                 <tr key={e.id}>
                   <td>
                     <strong>{dt(e.date)}</strong>
@@ -244,10 +286,14 @@ export default function Stock() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">
-          <Scale size={12} style={{ verticalAlign: -2 }} /> Showing latest{" "}
-          {led.data.length} movements
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="movements"
+        />
       </section>
     </div>
   );

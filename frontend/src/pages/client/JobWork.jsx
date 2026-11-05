@@ -1,27 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  Hammer,
-  PackageCheck,
-  Plus,
-  Printer,
-  Scale,
-  Search,
-  Truck,
-} from "lucide-react";
+import { Hammer, PackageCheck, Plus, Printer, Scale, Search, Truck, Ban } from "lucide-react";
 import toast from "react-hot-toast";
 import { fetchData, jobsApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-  Tabs,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, Tabs, ActionBtn } from "../../components/MasterUI";
+import Pagination from "../../components/Pagination";
 import {
   PURITIES,
   clean,
@@ -32,6 +17,7 @@ import {
   wt,
 } from "../../components/masterHelpers";
 import PrintDoc from "../../components/PrintDoc";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const STATUS = {
@@ -61,13 +47,23 @@ export default function JobWork() {
   const { can } = useAuth();
   const { customers, workers } = useMasters();
   const [f, setF] = useState({ owner: "", status: "" });
-  const { rows, loading, reload } = useList(() => jobsApi.list(clean(f)), [f]);
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => jobsApi.page({ ...clean(f), ...p }), [f]);
   const [issue, setIssue] = useState(null);
   const [recv, setRecv] = useState(null); // { job, pieces, scrap, date, location }
   const [saving, setSaving] = useState(false);
   const [doc, setDoc] = useState(null);
   const [avail, setAvail] = useState(null);
-  const [q, setQ] = useState("");
 
   const key = issue
     ? `${issue.owner}|${issue.customer}|${issue.issuedPurity}`
@@ -166,20 +162,11 @@ export default function JobWork() {
       reload();
   };
 
-  const shown = rows.filter((r) =>
-    `${r.jobNo}${r.customer?.name || ""}${r.worker?.name || ""}${r.product}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
-  );
-  const heldWt = rows
-    .filter((r) => r.status === "issued")
-    .reduce((s, r) => s + r.issuedWeight, 0);
-
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / JOB WORK</span>
+          <Breadcrumb />
           <h1>Job Work</h1>
           <p>
             Issue customer or own gold to a worker, then receive the finished
@@ -199,16 +186,28 @@ export default function JobWork() {
         )}
       </header>
       <div className="master-stats">
-        <Stat icon={Hammer} value={rows.length} label="Jobs" />
         <Stat
           icon={Hammer}
-          value={rows.filter((r) => r.status === "issued").length}
+          loading={!summary}
+          value={summary?.total ?? 0}
+          label="Jobs"
+        />
+        <Stat
+          icon={Hammer}
+          loading={!summary}
+          value={summary?.issued ?? 0}
           label="With Workers"
         />
-        <Stat icon={Scale} value={wt(heldWt)} label="Gold Held by Workers" />
+        <Stat
+          icon={Scale}
+          loading={!summary}
+          value={wt(summary?.heldWeight)}
+          label="Gold Held by Workers"
+        />
         <Stat
           icon={PackageCheck}
-          value={rows.filter((r) => r.status === "completed").length}
+          loading={!summary}
+          value={summary?.completed ?? 0}
           label="Completed"
         />
       </div>
@@ -258,8 +257,10 @@ export default function JobWork() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={8} loading={loading} />}
-              {shown.map((j) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={8} loading={loading} rows={limit} />
+              )}
+              {rows.map((j) => (
                 <tr key={j.id}>
                   <td>
                     <div className="name-cell">
@@ -324,40 +325,22 @@ export default function JobWork() {
                         </button>
                       )}
                       {can("jobs-manage") && j.status === "issued" && (
-                        <button
-                          className="act-text"
-                          onClick={() =>
-                            setRecv({
+                        <ActionBtn icon={PackageCheck} label="Receive jewellery" onClick={() => setRecv({
                               job: j,
                               pieces: [blankPiece(j.issuedPurity)],
                               scrap: "",
                               date: today(),
                               location: "Shop",
-                            })
-                          }
-                        >
-                          Receive
-                        </button>
+                            })} />
                       )}
                       {can("jobs-manage") && j.status === "issued" && (
-                        <button
-                          className="act-text red"
-                          onClick={() => cancel(j)}
-                        >
-                          Cancel
-                        </button>
+                        <ActionBtn icon={Ban} label="Cancel job" tone="danger" onClick={() => cancel(j)} />
                       )}
                       {can("jobs-manage") &&
                         j.owner === "customer" &&
                         j.status === "completed" &&
                         !j.delivered && (
-                          <button
-                            className="act-text"
-                            onClick={() => deliver(j)}
-                          >
-                            <Truck size={12} style={{ verticalAlign: -2 }} />{" "}
-                            Deliver
-                          </button>
+                          <ActionBtn icon={Truck} label="Deliver to customer" onClick={() => deliver(j)} />
                         )}
                     </div>
                   </td>
@@ -366,7 +349,14 @@ export default function JobWork() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} jobs</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="jobs"
+        />
       </section>
 
       {issue && (
@@ -412,7 +402,7 @@ export default function JobWork() {
             required
             value={issue.worker}
             onChange={(v) => setIssue({ ...issue, worker: v })}
-            options={opts(workers)}
+            options={opts(workers.filter((w) => w.kind !== "tool_vendor"))}
             placeholder="Select worker"
           />
           <CSelect

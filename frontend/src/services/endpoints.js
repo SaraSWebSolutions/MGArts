@@ -3,6 +3,15 @@ import api, { unwrapItem, unwrapList } from "./api";
 const list = async (path, params) =>
   unwrapList((await api.get(path, { params })).data);
 const item = async (path) => unwrapItem((await api.get(path)).data);
+/** paginated list -> { rows, meta, summary } (send page / limit / search in params) */
+const paged = async (path, params) => {
+  const body = (await api.get(path, { params })).data;
+  return {
+    rows: unwrapList(body),
+    meta: body?.meta ?? null,
+    summary: body?.summary ?? null,
+  };
+};
 
 /** Build multipart FormData from a plain object (null/undefined are skipped). */
 export const toFormData = (values) => {
@@ -22,7 +31,8 @@ export const authApi = {
 };
 
 export const usersApi = {
-  list: () => list("/users"),
+  list: (params) => list("/users", params),
+  page: (params) => paged("/users", params),
   get: (id) => item(`/users/${id}`),
   create: (formData) => api.post("/users", formData),
   update: (id, formData) => api.post(`/users/${id}`, formData), // multipart update uses POST
@@ -30,7 +40,8 @@ export const usersApi = {
 };
 
 export const rolesApi = {
-  list: () => list("/roles"),
+  list: (params) => list("/roles", params),
+  page: (params) => paged("/roles", params),
   get: (id) => item(`/roles/${id}`),
   create: (payload) => api.post("/roles", payload),
   update: (id, payload) => api.put(`/roles/${id}`, payload),
@@ -41,7 +52,8 @@ export const rolesApi = {
 };
 
 export const permissionsApi = {
-  list: () => list("/permissions"),
+  list: (params) => list("/permissions", params),
+  page: (params) => paged("/permissions", params),
   create: (payload) => api.post("/permissions", payload),
   update: (id, payload) => api.put(`/permissions/${id}`, payload),
   remove: (id) => api.delete(`/permissions/${id}`),
@@ -49,6 +61,7 @@ export const permissionsApi = {
 
 const crud = (base) => ({
   list: (params) => list(`/${base}`, params),
+  page: (params) => paged(`/${base}`, params),
   get: (id) => item(`/${base}/${id}`),
   create: (payload) => api.post(`/${base}`, payload),
   update: (id, payload) => api.put(`/${base}/${id}`, payload),
@@ -61,11 +74,14 @@ export const taxRatesApi = crud("tax-rates");
 export const settingsApi = {
   get: () => item("/settings"),
   update: (payload) => api.put("/settings", payload),
+  uploadLogo: (file) => api.post("/settings/logo", toFormData({ logo: file })),
+  removeLogo: () => api.delete("/settings/logo"),
 };
 
 /** transaction endpoints - POST creates, /void reverses stock */
 const txn = (base) => ({
   list: (params) => list(`/${base}`, params),
+  page: (params) => paged(`/${base}`, params),
   get: (id) => item(`/${base}/${id}`),
   create: (payload) => api.post(`/${base}`, payload),
   void: (id) => api.post(`/${base}/${id}/void`),
@@ -84,6 +100,7 @@ export const jobsApi = {
 };
 export const jewelleryApi = {
   list: (params) => list("/jewellery", params),
+  page: (params) => paged("/jewellery", params),
   update: (id, payload) => api.put(`/jewellery/${id}`, payload),
 };
 

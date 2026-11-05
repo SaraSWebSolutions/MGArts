@@ -10,7 +10,7 @@ import {
   Worker,
 } from "../models.js";
 import { auth, can } from "../auth.js";
-import { h, isId, oid, r2, r3 } from "../utils.js";
+import { h, isId, listPage, oid, pageRows, r2, r3 } from "../utils.js";
 import { balanceRows } from "../stock.js";
 
 const router = Router();
@@ -74,14 +74,20 @@ router.get(
     if (["gold", "jewellery"].includes(q.item)) base.item = q.item;
     if (q.txnType) base.txnType = q.txnType;
     const range = dateMatch(q);
-    const rows = await Ledger.find({
-      ...base,
-      ...(Object.keys(range).length ? { date: range } : {}),
-    })
-      .populate("customer", "name code")
-      .populate("worker", "name")
-      .sort({ date: -1, createdAt: -1 })
-      .limit(Math.min(Number(q.limit) || 300, 1000));
+    const page = await listPage(
+      Ledger,
+      {
+        ...base,
+        ...(Object.keys(range).length ? { date: range } : {}),
+      },
+      req,
+      {
+        sort: { date: -1, createdAt: -1 },
+        decorate: (qr) =>
+          qr.populate("customer", "name code").populate("worker", "name"),
+        legacyLimit: Math.min(Number(q.limit) || 300, 1000),
+      },
+    );
 
     const agg = (extra) =>
       Ledger.aggregate([
@@ -149,14 +155,19 @@ router.get(
         closing: r3(opening + inW - outW),
       };
     }
-    res.json({ data: rows, summary });
+    res.json({ data: page.data, meta: page.meta, summary });
   }),
 );
 
 /* ---------- reports ---------- */
-const report = (columns, rows, totals) => ({
-  data: { columns, rows, totals: totals || null },
-});
+/** totals are always for the whole result; rows are paged (?page=&limit=) - ?all=1 returns every row (CSV export) */
+const report = (req, columns, rows, totals) => {
+  const pg = pageRows(rows, req.query);
+  return {
+    data: { columns, rows: pg.rows, totals: totals || null },
+    ...(pg.meta ? { meta: pg.meta } : {}),
+  };
+};
 
 router.get(
   "/reports/reconciliation",
@@ -193,6 +204,7 @@ router.get(
     const sum = (k) => r3(rows.reduce((s, r) => s + (r[k] || 0), 0));
     res.json(
       report(
+        req,
         [
           { key: "jobNo", label: "Job" },
           { key: "date", label: "Date", type: "date" },
@@ -260,6 +272,7 @@ router.get(
       .sort((a, b) => a.customer.localeCompare(b.customer));
     res.json(
       report(
+        req,
         [
           { key: "customer", label: "Customer" },
           { key: "received", label: "Gold received (g)", type: "wt" },
@@ -320,6 +333,7 @@ router.get(
     const t = p.find((x) => x._id === "tool");
     res.json({
       ...report(
+        req,
         [
           { key: "item", label: "Stock" },
           { key: "purity", label: "Purity" },
@@ -343,7 +357,7 @@ router.get(
 router.get(
   "/reports/worker-jobs",
   can("reports-view"),
-  h(async (_req, res) => {
+  h(async (req, res) => {
     const jobs = await Job.find({ status: { $ne: "cancelled" } }).populate(
       "worker",
       "name",
@@ -378,6 +392,7 @@ router.get(
       .sort((a, b) => a.worker.localeCompare(b.worker));
     res.json(
       report(
+        req,
         [
           { key: "worker", label: "Worker / vendor" },
           { key: "pending", label: "Pending jobs" },
@@ -421,6 +436,8 @@ router.get(
       customer: j.customer?.name || "—",
       jobNo: j.jobNo,
       making: j.makingCharge,
+      offer: j.offerAmount || 0,
+      taxable: j.taxableValue || j.makingCharge,
       taxNames: j.taxes?.length
         ? j.taxes.map((t) => `${t.name} ${t.rate}%`).join(" + ")
         : `GST ${j.gstRate}%`,
@@ -433,12 +450,15 @@ router.get(
     const sum = (k) => r2(rows.reduce((s, r) => s + (r[k] || 0), 0));
     res.json(
       report(
+        req,
         [
           { key: "invoiceNo", label: "Invoice" },
           { key: "date", label: "Date", type: "date" },
           { key: "customer", label: "Customer" },
           { key: "jobNo", label: "Job" },
           { key: "making", label: "Making (₹)", type: "money" },
+          { key: "offer", label: "Offer (₹)", type: "money" },
+          { key: "taxable", label: "Taxable (₹)", type: "money" },
           { key: "taxNames", label: "Taxes" },
           { key: "gstRate", label: "Total tax %", type: "pct" },
           { key: "gst", label: "GST (₹)", type: "money" },
@@ -450,6 +470,8 @@ router.get(
         {
           invoiceNo: "Total",
           making: sum("making"),
+          offer: sum("offer"),
+          taxable: sum("taxable"),
           gst: sum("gst"),
           total: sum("total"),
           paid: sum("paid"),

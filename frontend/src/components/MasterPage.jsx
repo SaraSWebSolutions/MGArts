@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "../services/api";
 import { useAuth } from "../context/authContext";
-import { useList } from "../hooks";
+import { usePaged } from "../hooks";
 import { Drawer, EmptyRow, Field, Select, Stat, StatusPill } from "./MasterUI";
+import Pagination from "./Pagination";
 import { STATUS_OPTIONS, formValues, isActive } from "./masterHelpers";
 import "../pages/client/Masters.css";
+import Breadcrumb from "./Breadcrumb";
 
 /**
  * Config-driven master screen (same look as the Units / Lines pages).
@@ -14,7 +16,6 @@ import "../pages/client/Masters.css";
  * columns: [{ label, render(row) }]   primary(row) -> { title, sub }
  */
 export default function MasterPage({
-  eyebrow,
   title,
   subtitle,
   icon: Icon,
@@ -24,21 +25,26 @@ export default function MasterPage({
   primary,
   columns,
   fields,
-  search,
   stats = () => [],
   note,
 }) {
   const { can } = useAuth();
-  const { rows, loading, reload } = useList(() => api.list(), []);
-  const [q, setQ] = useState("");
+  // search / paging are handled by the backend (?page=&limit=&search=)
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => api.page(p), []);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const allowed = can(perm);
-
-  const filtered = useMemo(
-    () => rows.filter((r) => search(r).toLowerCase().includes(q.toLowerCase())),
-    [rows, q, search],
-  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -81,7 +87,7 @@ export default function MasterPage({
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">{eyebrow}</span>
+          <Breadcrumb />
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>
@@ -92,10 +98,16 @@ export default function MasterPage({
         )}
       </header>
       <div className="master-stats">
-        <Stat icon={Icon} value={rows.length} label={`Total ${title}`} />
         <Stat
           icon={Icon}
-          value={rows.filter((r) => isActive(r.status)).length}
+          loading={!summary}
+          value={summary?.total ?? 0}
+          label={`Total ${title}`}
+        />
+        <Stat
+          icon={Icon}
+          loading={!summary}
+          value={summary?.active ?? 0}
           label="Active"
         />
         {stats(rows).map((s) => (
@@ -131,10 +143,14 @@ export default function MasterPage({
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
-                <EmptyRow colSpan={columns.length + 2} loading={loading} />
+              {rows.length === 0 && (
+                <EmptyRow
+                  colSpan={columns.length + 2}
+                  loading={loading}
+                  rows={limit}
+                />
               )}
-              {filtered.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -178,9 +194,14 @@ export default function MasterPage({
             </tbody>
           </table>
         </div>
-        <div className="master-footer">
-          Showing {filtered.length} of {rows.length}
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label={title.toLowerCase()}
+        />
       </section>
 
       {editing && (

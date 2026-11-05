@@ -68,7 +68,11 @@ export const Customer = make("Customer", {
 export const Worker = make("Worker", {
   code: { type: String, unique: true },
   name: { type: String, required: true, trim: true },
-  kind: { type: String, enum: ["worker", "vendor"], default: "worker" },
+  kind: {
+    type: String,
+    enum: ["worker", "vendor", "tool_vendor"], // tool_vendor: sells tools & equipment only (never used for job work)
+    default: "worker",
+  },
   mobile: { type: String, default: "" },
   address: { type: String, default: "" },
   status: { type: Number, default: 1 },
@@ -91,6 +95,7 @@ export const Setting = make("Setting", {
   barPurity: { type: Number, default: 999 }, // 24K
   sacCode: { type: String, default: "9988" },
   wastageAlertPercent: { type: Number, default: 2 },
+  logo: { type: String, default: "" }, // invoice / receipt header image (uploads folder)
 });
 
 /* ---------- stock ledger : single source of truth for every gram ---------- */
@@ -148,6 +153,7 @@ export const Conversion = make("Conversion", {
   outputWeight: Number,
   fineWeight: Number,
   alloyAdded: Number,
+  convertedTo: { type: String, default: "" }, // what the gold becomes: bar, chain, ring...
   notes: { type: String, default: "" },
   status,
   createdBy: ref("User"),
@@ -230,7 +236,11 @@ export const Job = make("Job", {
     default: "per_gram",
   },
   makingChargeValue: { type: Number, default: 0 },
-  makingCharge: { type: Number, default: 0 },
+  makingCharge: { type: Number, default: 0 }, // before the offer
+  offerType: { type: String, enum: ["amount", "percent"], default: "amount" },
+  offerValue: { type: Number, default: 0 }, // rupees or percent, as typed
+  offerAmount: { type: Number, default: 0 }, // offer in rupees
+  taxableValue: { type: Number, default: 0 }, // making charge - offer
   taxRate: ref("TaxRate", { default: null }),
   taxes: taxLines,
   gstRate: { type: Number, default: 0 },

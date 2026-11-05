@@ -46,11 +46,15 @@ async function needWorker(id) {
   if (w.status === 0) throw bad("Worker / vendor is inactive");
   return w;
 }
-async function pickSupplier(body, required) {
+async function pickSupplier(body, required, forKind) {
   let supplierId = null;
   let supplier = String(body.supplier || "").trim();
   if (isId(body.supplierId)) {
     const w = await needWorker(body.supplierId);
+    if (forKind === "tool" && w.kind !== "tool_vendor")
+      throw bad("Select a tools & equipment vendor for a tool purchase");
+    if (forKind !== "tool" && w.kind === "tool_vendor")
+      throw bad("That is a tools & equipment vendor - choose a gold / jewellery supplier");
     supplierId = w._id;
     supplier = w.name;
   }
@@ -152,12 +156,9 @@ export async function createConversion(body, userId) {
     body.targetPurity || cfg.basePurity,
     "Target purity",
   );
-  if (sourcePurity < targetPurity)
-    throw bad(
-      "Source purity must be equal to or higher than the target purity",
-    );
-  if (sourcePurity === targetPurity)
-    throw bad("Source and target purity are the same - nothing to convert");
+  // lower purity: alloy is added; same purity: re-melt, nothing added;
+  // higher purity (refining, e.g. 22K -> 24K): alloy is removed, so the weight comes down.
+  // In every case the fine gold stays the same.
   const inputWeight = r3(positive(body.inputWeight, "Input weight"));
   const fineWeight = r3((inputWeight * sourcePurity) / 1000);
   const outputWeight = r3((inputWeight * sourcePurity) / targetPurity);
@@ -179,6 +180,7 @@ export async function createConversion(body, userId) {
     outputWeight,
     fineWeight,
     alloyAdded: r3(outputWeight - inputWeight),
+    convertedTo: String(body.convertedTo || "").trim(),
     notes: body.notes || "",
     createdBy: userId,
   });
@@ -217,7 +219,7 @@ export async function createPurchase(body, userId) {
   if (!["gold", "jewellery", "tool"].includes(kind))
     throw bad("Purchase kind must be gold, jewellery or tool");
   const opening = kind !== "tool" && body.entryType === "opening";
-  const { supplierId, supplier } = await pickSupplier(body, !opening);
+  const { supplierId, supplier } = await pickSupplier(body, !opening, kind);
   const has = (v) => v !== undefined && v !== null && v !== "";
   const common = {
     kind,
@@ -234,12 +236,9 @@ export async function createPurchase(body, userId) {
     const itemName = String(body.itemName || "").trim();
     if (!itemName) throw bad("Tool / equipment name is required");
     const quantity = positive(has(body.quantity) ? body.quantity : 1, "Quantity");
-    if (!has(body.rate) && !has(body.amount))
-      throw bad("Enter the price per unit or the total amount");
+    if (!has(body.amount)) throw bad("Amount is required");
     const rate = has(body.rate) ? r2(positive(body.rate, "Price per unit")) : 0;
-    const amount = has(body.amount)
-      ? r2(positive(body.amount, "Amount"))
-      : r2(quantity * rate);
+    const amount = r2(positive(body.amount, "Amount"));
     await dupGuard(Purchase, { kind: "tool", itemName, amount, supplier });
     return Purchase.create({
       ...common,
@@ -256,9 +255,10 @@ export async function createPurchase(body, userId) {
     const weight = r3(positive(body.weight, "Weight"));
     const purity = purityOf(body.purity);
     const rate = nonNeg(body.rate, "Rate");
+    if (!opening && !has(body.amount)) throw bad("Amount is required");
     const amount = has(body.amount)
-      ? r2(nonNeg(body.amount, "Amount"))
-      : r2(weight * rate);
+      ? r2(opening ? nonNeg(body.amount, "Amount") : positive(body.amount, "Amount"))
+      : 0;
     await dupGuard(Purchase, { kind: "gold", weight, purity, supplier, amount });
     const doc = new Purchase({
       ...common,
@@ -307,9 +307,10 @@ export async function createPurchase(body, userId) {
   });
   const weight = r3(pieces.reduce((s, p) => s + p.weight, 0));
   const rate = nonNeg(body.rate, "Rate per gram");
+  if (!opening && !has(body.amount)) throw bad("Amount is required");
   const amount = has(body.amount)
-    ? r2(nonNeg(body.amount, "Amount"))
-    : r2(weight * rate);
+    ? r2(opening ? nonNeg(body.amount, "Amount") : positive(body.amount, "Amount"))
+    : 0;
   await dupGuard(Purchase, { kind: "jewellery", weight, supplier, amount });
   const tags = [];
   for (let i = 0; i < pieces.length; i += 1) tags.push(await nextNumber("TAG"));
@@ -372,6 +373,8 @@ export async function createPurchase(body, userId) {
 export async function createJob(body, userId) {
   const customer = await ownerCustomer(body);
   const worker = await needWorker(body.worker);
+  if (worker.kind === "tool_vendor")
+    throw bad("Tools & equipment vendors cannot be used for job work");
   const issuedWeight = r3(positive(body.issuedWeight, "Issue weight"));
   const cfg = await getSettings();
   const issuedPurity = purityOf(
@@ -531,21 +534,31 @@ export async function cancelJob(id, userId) {
   if (!job) throw new HttpError(404, "Job not found");
   if (job.status !== "issued")
     throw bad("Only jobs that are still issued can be cancelled");
+  if (await Payment.exists({ job: job._id, status: "active" }))
+    throw bad("This job has payments recorded - void the payments first");
   await reverseLedger(job._id, userId, `job ${job.jobNo} cancelled`);
   job.status = "cancelled";
   return job.save();
 }
 
 /* 6 · making charge + GST (customer jobs only) */
-function recalcCharges(job) {
+function makingOf(job) {
   const basis = job.finishedWeight || job.issuedWeight;
-  job.makingCharge = r2(
+  return r2(
     job.makingChargeType === "per_gram"
       ? job.makingChargeValue * basis
       : job.makingChargeValue,
   );
-  applyTaxes(job, job.makingCharge);
-  job.totalCharge = r2(job.makingCharge + job.gstAmount);
+}
+/** making charge -> less offer -> taxable value -> taxes -> total */
+function recalcCharges(job) {
+  job.makingCharge = makingOf(job);
+  const v = job.offerValue || 0;
+  const offer = job.offerType === "percent" ? (job.makingCharge * v) / 100 : v;
+  job.offerAmount = r2(Math.min(offer, job.makingCharge));
+  job.taxableValue = r2(job.makingCharge - job.offerAmount);
+  applyTaxes(job, job.taxableValue);
+  job.totalCharge = r2(job.taxableValue + job.gstAmount);
 }
 export async function setCharges(id, body) {
   const job = await Job.findById(id);
@@ -557,6 +570,12 @@ export async function setCharges(id, body) {
   job.makingChargeType =
     body.makingChargeType === "fixed" ? "fixed" : "per_gram";
   job.makingChargeValue = nonNeg(body.makingChargeValue, "Making charge");
+  job.offerType = body.offerType === "percent" ? "percent" : "amount";
+  job.offerValue = r2(nonNeg(body.offerValue, "Offer"));
+  if (job.offerType === "percent" && job.offerValue > 100)
+    throw bad("Offer percentage cannot be more than 100");
+  if (job.offerType === "amount" && job.offerValue > makingOf(job) + 0.004)
+    throw bad("Offer amount cannot be more than the making charge");
   job.taxes = taxes;
   job.taxRate = taxes[0].taxRate;
   job.gstRate = r3(taxes.reduce((s, t) => s + t.rate, 0));

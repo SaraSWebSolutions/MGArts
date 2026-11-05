@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
-import { FlaskConical, Plus, Scale, Search } from "lucide-react";
+import { FlaskConical, Plus, Scale, Search, Ban } from "lucide-react";
 import toast from "react-hot-toast";
 import { conversionsApi, fetchData } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, ActionBtn } from "../../components/MasterUI";
+import Pagination from "../../components/Pagination";
 import {
   OWNER_LABEL,
   PURITIES,
@@ -22,6 +16,7 @@ import {
   today,
   wt,
 } from "../../components/masterHelpers";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const blank = () => ({
@@ -31,6 +26,7 @@ const blank = () => ({
   sourcePurity: "999",
   targetPurity: "916",
   inputWeight: "",
+  convertedTo: "",
   notes: "",
 });
 
@@ -38,14 +34,22 @@ export default function Conversions() {
   const { can } = useAuth();
   const { customers } = useMasters();
   const [owner, setOwner] = useState("");
-  const { rows, loading, reload } = useList(
-    () => conversionsApi.list(owner ? { owner } : {}),
-    [owner],
-  );
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => conversionsApi.page({ ...(owner ? { owner } : {}), ...p }),
+    [owner]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [avail, setAvail] = useState(null);
-  const [q, setQ] = useState("");
 
   // show how much gold of the chosen purity is actually available
   const key = form ? `${form.owner}|${form.customer}|${form.sourcePurity}` : "";
@@ -108,22 +112,18 @@ export default function Conversions() {
     )
       reload();
   };
-  const shown = rows.filter((r) =>
-    `${r.convNo}${r.customer?.name || "own"}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
-  );
-  const active = rows.filter((r) => r.status === "active");
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / CONVERSION</span>
-          <h1>Gold Conversion (24K → 22K)</h1>
+          <Breadcrumb />
+          <h1>Gold Conversion</h1>
           <p>
-            Alloy is added to pure gold. 100 g of 24K becomes about 109.17 g of
-            22K. Every conversion is kept as history.
+            Change gold from one purity to another: 24K → 22K (alloy added),
+            22K → 22K (melt and re-cast), or 22K → 24K (refining, alloy
+            removed). Fine gold stays the same. Every conversion is kept as
+            history.
           </p>
         </div>
         {can("conversions-manage") && (
@@ -139,16 +139,23 @@ export default function Conversions() {
         )}
       </header>
       <div className="master-stats">
-        <Stat icon={FlaskConical} value={active.length} label="Conversions" />
+        <Stat
+          icon={FlaskConical}
+          loading={!summary}
+          value={summary?.count ?? 0}
+          label="Conversions"
+        />
         <Stat
           icon={Scale}
-          value={wt(active.reduce((s, r) => s + r.inputWeight, 0))}
+          loading={!summary}
+          value={wt(summary?.inputWeight)}
           label="Gold Converted"
         />
         <Stat
           icon={Scale}
-          value={wt(active.reduce((s, r) => s + r.alloyAdded, 0))}
-          label="Alloy Added"
+          loading={!summary}
+          value={wt(summary?.alloyAdded)}
+          label="Alloy Added / (Removed)"
         />
       </div>
       <section className="master-card">
@@ -183,8 +190,10 @@ export default function Conversions() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={7} loading={loading} />}
-              {shown.map((r) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={7} loading={loading} rows={limit} />
+              )}
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -214,8 +223,14 @@ export default function Conversions() {
                     <span className="sub">
                       {karat(r.targetPurity) || ""} · {r.targetPurity}
                     </span>
+                    {r.convertedTo && (
+                      <span className="sub">→ {r.convertedTo}</span>
+                    )}
                   </td>
-                  <td className="num">{wt(r.alloyAdded)}</td>
+                  <td className="num">
+                    {r.alloyAdded < -0.0004 ? "− " : ""}
+                    {wt(Math.abs(r.alloyAdded))}
+                  </td>
                   <td>
                     {r.status === "void" ? (
                       <Badge tone="grey">Void</Badge>
@@ -225,12 +240,7 @@ export default function Conversions() {
                   </td>
                   <td>
                     {can("conversions-manage") && r.status === "active" && (
-                      <button
-                        className="act-text red"
-                        onClick={() => voidIt(r)}
-                      >
-                        Void
-                      </button>
+                      <ActionBtn icon={Ban} label="Void conversion" tone="danger" onClick={() => voidIt(r)} />
                     )}
                   </td>
                 </tr>
@@ -238,7 +248,14 @@ export default function Conversions() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} conversions</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="conversions"
+        />
       </section>
 
       {form && (
@@ -314,9 +331,21 @@ export default function Conversions() {
               <strong>{wt(out)}</strong>
             </div>
             <div>
-              <span>Alloy added</span>
-              <strong>{wt(out - input)}</strong>
+              <span>{out - input < -0.0004 ? "Alloy removed" : "Alloy added"}</span>
+              <strong>{wt(Math.abs(out - input))}</strong>
             </div>
+          </div>
+          <CField
+            full
+            label="Converted to (optional)"
+            placeholder="e.g. Gold bar, Chain, Ring, Bangle"
+            value={form.convertedTo}
+            onChange={(v) => setForm({ ...form, convertedTo: v })}
+          />
+          <div className="master-note">
+            Conversion keeps the gold as gold (only the purity or form changes).
+            To make a chain, ring or any new jewellery, issue this gold to a
+            worker in Job Work.
           </div>
           <CField
             full

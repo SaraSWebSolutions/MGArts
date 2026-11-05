@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Pencil,
   Plus,
@@ -18,6 +18,9 @@ import {
   Stat,
 } from "../../components/MasterUI";
 import { formValues, imageUrl } from "../../components/masterHelpers";
+import Pagination from "../../components/Pagination";
+import { usePaged } from "../../hooks";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const PASSWORD_KEYS = ["password", "password_confirmation"];
@@ -25,37 +28,36 @@ const PASSWORD_KEYS = ["password", "password_confirmation"];
 const roleIdOf = (u) => String(u.role_id ?? u.role?.id ?? "");
 
 export default function Users() {
-  const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [rolesReady, setRolesReady] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [editing, setEditing] = useState(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [u, r] = await Promise.all([
-        usersApi.list(),
-        rolesApi.list().catch(() => []),
-      ]);
-      setUsers(u);
-      setRoles(r);
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to load users"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // search / role filter / paging are all done by the backend
+  const {
+    rows: users,
+    meta,
+    summary,
+    loading,
+    reload: load,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged(
+    (p) => usersApi.page({ ...p, ...(roleFilter ? { role: roleFilter } : {}) }),
+    [roleFilter],
+  );
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
-  // useEffect(() => {
-  //   load();
-  // }, [load]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // roles are only needed for the filter, the Role column and the form
   useEffect(() => {
-    void Promise.resolve().then(load);
+    rolesApi
+      .list()
+      .then(setRoles)
+      .catch(() => {})
+      .finally(() => setRolesReady(true));
   }, []);
 
   const roleNameOf = (u) =>
@@ -63,18 +65,6 @@ export default function Users() {
     u.role_name ??
     roles.find((r) => String(r.id) === roleIdOf(u))?.name ??
     "—";
-
-  const filtered = useMemo(
-    () =>
-      users.filter(
-        (u) =>
-          (!roleFilter || roleIdOf(u) === roleFilter) &&
-          `${u.name}${u.userId ?? ""}${u.email ?? ""}${u.mobile_number ?? ""}`
-            .toLowerCase()
-            .includes(q.toLowerCase()),
-      ),
-    [users, q, roleFilter],
-  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -118,7 +108,7 @@ export default function Users() {
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">ADMINISTRATION / USERS</span>
+          <Breadcrumb />
           <h1>Users</h1>
           <p>Create users, assign roles and manage their sign-in details.</p>
         </div>
@@ -128,8 +118,18 @@ export default function Users() {
       </header>
 
       <div className="master-stats">
-        <Stat icon={UsersIcon} value={users.length} label="Total Users" />
-        <Stat icon={ShieldCheck} value={roles.length} label="Roles" />
+        <Stat
+          icon={UsersIcon}
+          loading={!summary}
+          value={summary?.total ?? 0}
+          label="Total Users"
+        />
+        <Stat
+          icon={ShieldCheck}
+          loading={!rolesReady}
+          value={roles.length}
+          label="Roles"
+        />
       </div>
 
       <section className="master-card">
@@ -167,10 +167,10 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
-                <EmptyRow colSpan={4} loading={loading} />
+              {users.length === 0 && (
+                <EmptyRow colSpan={4} loading={loading} rows={limit} />
               )}
-              {filtered.map((u) => (
+              {users.map((u) => (
                 <tr key={u.id}>
                   <td>
                     <div className="name-cell">
@@ -225,9 +225,14 @@ export default function Users() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">
-          {filtered.length} of {users.length} users
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="users"
+        />
       </section>
 
       {editing && (

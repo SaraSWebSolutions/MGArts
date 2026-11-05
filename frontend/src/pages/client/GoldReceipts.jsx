@@ -1,18 +1,11 @@
 import { useState } from "react";
-import { HandCoins, Plus, Printer, Scale, Search } from "lucide-react";
+import { HandCoins, Plus, Printer, Scale, Search, Ban } from "lucide-react";
 import toast from "react-hot-toast";
 import { receiptsApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, ActionBtn } from "../../components/MasterUI";
 import {
   PURITIES,
   clean,
@@ -23,6 +16,8 @@ import {
   wt,
 } from "../../components/masterHelpers";
 import PrintDoc from "../../components/PrintDoc";
+import Pagination from "../../components/Pagination";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const blankItem = () => ({
@@ -43,14 +38,21 @@ export default function GoldReceipts() {
   const { can } = useAuth();
   const { customers } = useMasters();
   const [f, setF] = useState({ customer: "", from: "", to: "" });
-  const { rows, loading, reload } = useList(
-    () => receiptsApi.list(clean(f)),
-    [f],
-  );
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => receiptsApi.page({ ...clean(f), ...p }), [f]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [doc, setDoc] = useState(null);
-  const [q, setQ] = useState("");
 
   const setItem = (i, k, v) =>
     setForm((p) => ({
@@ -106,16 +108,11 @@ export default function GoldReceipts() {
       reload();
   };
 
-  const shown = rows.filter((r) =>
-    `${r.receiptNo}${r.customer?.name}`.toLowerCase().includes(q.toLowerCase()),
-  );
-  const active = rows.filter((r) => r.status === "active");
-
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / CUSTOMER GOLD</span>
+          <Breadcrumb />
           <h1>Customer Gold Receipts</h1>
           <p>
             Gold bars and old gold given by customers. It is added to Customer
@@ -129,15 +126,22 @@ export default function GoldReceipts() {
         )}
       </header>
       <div className="master-stats">
-        <Stat icon={HandCoins} value={active.length} label="Receipts" />
+        <Stat
+          icon={HandCoins}
+          loading={!summary}
+          value={summary?.count ?? 0}
+          label="Receipts"
+        />
         <Stat
           icon={Scale}
-          value={wt(active.reduce((s, r) => s + r.totalWeight, 0))}
+          loading={!summary}
+          value={wt(summary?.totalWeight)}
           label="Gold Received"
         />
         <Stat
           icon={Scale}
-          value={wt(active.reduce((s, r) => s + r.fineWeight, 0))}
+          loading={!summary}
+          value={wt(summary?.fineWeight)}
           label="Fine Gold"
         />
       </div>
@@ -191,8 +195,10 @@ export default function GoldReceipts() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={7} loading={loading} />}
-              {shown.map((r) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={7} loading={loading} rows={limit} />
+              )}
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -233,12 +239,7 @@ export default function GoldReceipts() {
                         <Printer size={14} />
                       </button>
                       {can("receipts-manage") && r.status === "active" && (
-                        <button
-                          className="act-text red"
-                          onClick={() => voidIt(r)}
-                        >
-                          Void
-                        </button>
+                        <ActionBtn icon={Ban} label="Void receipt" tone="danger" onClick={() => voidIt(r)} />
                       )}
                     </div>
                   </td>
@@ -247,7 +248,14 @@ export default function GoldReceipts() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} receipts</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="receipts"
+        />
       </section>
 
       {form && (

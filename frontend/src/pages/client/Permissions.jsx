@@ -1,48 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { permissionsApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { Drawer, EmptyRow, Field, Stat } from "../../components/MasterUI";
 import { formValues } from "../../components/masterHelpers";
+import Pagination from "../../components/Pagination";
+import { usePaged } from "../../hooks";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 export default function Permissions() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload: load,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => permissionsApi.page(p), []);
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      setRows(await permissionsApi.list());
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to load permissions"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
-  // useEffect(() => {
-  //   load();
-  // }, [load]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-    useEffect(() => {
-      void Promise.resolve().then(load);
-    }, []);
-
-  const filtered = useMemo(
-    () =>
-      rows.filter((r) =>
-        `${r.name}${r.description ?? ""}`
-          .toLowerCase()
-          .includes(q.toLowerCase()),
-      ),
-    [rows, q],
-  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -80,7 +62,7 @@ export default function Permissions() {
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">ADMINISTRATION / PERMISSIONS</span>
+          <Breadcrumb />
           <h1>Permissions</h1>
           <p>Define the actions that can be granted to roles.</p>
         </div>
@@ -90,7 +72,12 @@ export default function Permissions() {
       </header>
 
       <div className="master-stats">
-        <Stat icon={KeyRound} value={rows.length} label="Permissions" />
+        <Stat
+          icon={KeyRound}
+          loading={!summary}
+          value={summary?.total ?? 0}
+          label="Permissions"
+        />
       </div>
 
       <section className="master-card">
@@ -114,10 +101,10 @@ export default function Permissions() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
-                <EmptyRow colSpan={3} loading={loading} />
+              {rows.length === 0 && (
+                <EmptyRow colSpan={3} loading={loading} rows={limit} />
               )}
-              {filtered.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -153,9 +140,14 @@ export default function Permissions() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">
-          {filtered.length} of {rows.length} permissions
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="permissions"
+        />
       </section>
 
       {editing && (

@@ -1,13 +1,18 @@
 import { X } from "lucide-react";
+import { Skeleton, SkeletonRows } from "./Loaders";
 
-export function Stat({ icon: Icon, value, label }) {
+export function Stat({ icon: Icon, value, label, loading }) {
   return (
-    <div className="master-stat">
+    <div className="master-stat" aria-busy={loading || undefined}>
       <span className="master-stat-icon">
         <Icon size={19} />
       </span>
       <div>
-        <strong>{value}</strong>
+        {loading ? (
+          <Skeleton width={64} height={18} style={{ margin: "2px 0 7px" }} />
+        ) : (
+          <strong>{value}</strong>
+        )}
         <span>{label}</span>
       </div>
     </div>
@@ -143,13 +148,35 @@ export function Drawer({
 }
 
 /** Row shown inside a table body while loading / when empty. */
-export function EmptyRow({ colSpan, loading, text = "No records found" }) {
+export function EmptyRow({
+  colSpan,
+  loading,
+  text = "No records found",
+  rows = 5,
+}) {
+  if (loading) return <SkeletonRows cols={colSpan} rows={rows} />;
   return (
     <tr>
       <td colSpan={colSpan} className="master-empty">
-        {loading ? "Loading..." : text}
+        {text}
       </td>
     </tr>
+  );
+}
+
+/** small icon button for the Actions column (label shows as a tooltip) */
+export function ActionBtn({ icon: Icon, label, tone, onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      className={`icon-square ${tone === "danger" ? "danger" : ""}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <Icon size={14} />
+    </button>
   );
 }
 

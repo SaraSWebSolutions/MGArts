@@ -1,19 +1,12 @@
 import { useState } from "react";
-import { Gem, Plus, Scale, Search, ShoppingCart, Wrench } from "lucide-react";
+import { Gem, Plus, Scale, Search, ShoppingCart, Wrench, Ban } from "lucide-react";
 import toast from "react-hot-toast";
 import { purchasesApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-  Tabs,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, Tabs, ActionBtn } from "../../components/MasterUI";
+import Pagination from "../../components/Pagination";
 import {
   PURITIES,
   dt,
@@ -23,6 +16,7 @@ import {
   today,
   wt,
 } from "../../components/masterHelpers";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const ENTRY_TYPES = [
@@ -47,6 +41,7 @@ const blank = (kind) => ({
   purity: "999",
   rate: "",
   amount: "",
+  amountEdited: false,
   itemName: "",
   size: "",
   quantity: "1",
@@ -79,13 +74,20 @@ export default function Purchases() {
   const { can } = useAuth();
   const { workers } = useMasters();
   const [kind, setKind] = useState("gold");
-  const { rows, loading, reload } = useList(
-    () => purchasesApi.list({ kind }),
-    [kind],
-  );
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => purchasesApi.page({ kind, ...p }), [kind]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState("");
   const tab = TABS[kind];
   const Icon = tab.icon;
   const opening = form?.entryType === "opening";
@@ -93,19 +95,36 @@ export default function Purchases() {
   const num = (v) => (Number(v) || 0);
   const net = (p) => Math.max(num(p.grossWeight) - num(p.stoneWeight), 0);
   const jewelWeight = form && kind === "jewellery" ? form.pieces.reduce((s, p) => s + net(p), 0) : 0;
-  const calc =
-    form && kind === "gold"
-      ? num(form.weight) * num(form.rate)
-      : form && kind === "jewellery"
-        ? jewelWeight * num(form.rate)
-        : form
-          ? num(form.quantity) * num(form.rate)
-          : 0;
+  /** every change recalculates the amount, until the user types an amount himself */
+  const upd = (patch) =>
+    setForm((f) => {
+      const n = { ...f, ...patch };
+      if ("amount" in patch) n.amountEdited = true;
+      else if (!n.amountEdited) {
+        const c =
+          n.kind === "gold"
+            ? num(n.weight) * num(n.rate)
+            : n.kind === "jewellery"
+              ? n.pieces.reduce((t, p) => t + net(p), 0) * num(n.rate)
+              : num(n.quantity) * num(n.rate);
+        n.amount = c > 0 ? String(Math.round(c * 100) / 100) : "";
+      }
+      return n;
+    });
   const setPiece = (i, k, v) =>
-    setForm((f) => ({
-      ...f,
-      pieces: f.pieces.map((p, n) => (n === i ? { ...p, [k]: v } : p)),
-    }));
+    upd({ pieces: form.pieces.map((p, n) => (n === i ? { ...p, [k]: v } : p)) });
+  const amountField = (
+    <CField
+      label={opening ? "Amount (optional)" : "Amount (₹)"}
+      type="number"
+      step="0.01"
+      required={!opening}
+      full={kind === "jewellery"}
+      value={form?.amount}
+      onChange={(v) => upd({ amount: v })}
+      placeholder="Total bill amount"
+    />
+  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -115,6 +134,7 @@ export default function Purchases() {
       ["weight", "purity", "rate", "amount", "quantity"].forEach((k) => {
         body[k] = body[k] === "" ? undefined : Number(body[k]);
       });
+      delete body.amountEdited;
       if (!body.supplierId) delete body.supplierId;
       if (kind === "jewellery")
         body.pieces = form.pieces.map((p) => ({
@@ -149,18 +169,12 @@ export default function Purchases() {
     )
       reload();
   };
-  const shown = rows.filter((r) =>
-    `${r.purchaseNo}${r.supplier}${r.itemName}${r.size}${r.invoiceNo}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
-  );
-  const active = rows.filter((r) => r.status === "active");
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / ADD OWN STOCK</span>
+          <Breadcrumb />
           <h1>Add Own Stock</h1>
           <p>
             Add gold, ready-made jewellery or tools to your own shop - bought
@@ -183,23 +197,31 @@ export default function Purchases() {
         ]}
       />
       <div className="master-stats">
-        <Stat icon={ShoppingCart} value={active.length} label="Entries" />
+        <Stat
+          icon={ShoppingCart}
+          loading={!summary}
+          value={summary?.count ?? 0}
+          label="Entries"
+        />
         {kind === "tool" ? (
           <Stat
             icon={Wrench}
-            value={active.reduce((s, r) => s + r.quantity, 0)}
+            loading={!summary}
+            value={summary?.quantity ?? 0}
             label="Items"
           />
         ) : (
           <Stat
             icon={kind === "gold" ? Scale : Gem}
-            value={wt(active.reduce((s, r) => s + r.weight, 0))}
+            loading={!summary}
+            value={wt(summary?.weight)}
             label={kind === "gold" ? "Gold Added" : "Jewellery (net)"}
           />
         )}
         <Stat
           icon={ShoppingCart}
-          value={money(active.reduce((s, r) => s + r.amount, 0))}
+          loading={!summary}
+          value={money(summary?.amount)}
           label="Total Spent"
         />
       </div>
@@ -233,8 +255,10 @@ export default function Purchases() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={6} loading={loading} />}
-              {shown.map((r) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={6} loading={loading} rows={limit} />
+              )}
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -295,12 +319,7 @@ export default function Purchases() {
                   </td>
                   <td>
                     {can("purchases-manage") && r.status === "active" && (
-                      <button
-                        className="act-text red"
-                        onClick={() => voidIt(r)}
-                      >
-                        Void
-                      </button>
+                      <ActionBtn icon={Ban} label="Void entry" tone="danger" onClick={() => voidIt(r)} />
                     )}
                   </td>
                 </tr>
@@ -308,7 +327,14 @@ export default function Purchases() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} entries</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="entries"
+        />
       </section>
 
       {form && (
@@ -332,23 +358,30 @@ export default function Purchases() {
           {!opening && (
             <>
               <CSelect
-                label="Supplier / vendor *"
+                label={kind === "tool" ? "Tools & equipment vendor" : "Supplier / vendor"}
                 value={form.supplierId}
                 onChange={(v) => setForm({ ...form, supplierId: v })}
                 options={workers
-                  .filter((w) => isActive(w.status))
-                  .map((w) => ({
-                    value: w.id,
-                    label: `${w.name} (${w.kind === "vendor" ? "vendor" : "worker"})`,
-                  }))}
-                placeholder="Select from Workers & Vendors"
+                  .filter(
+                    (w) =>
+                      isActive(w.status) &&
+                      (kind === "tool"
+                        ? w.kind === "tool_vendor"
+                        : w.kind !== "tool_vendor"),
+                  )
+                  .map((w) => ({ value: w.id, label: w.name }))}
+                placeholder={
+                  kind === "tool"
+                    ? "Select tools & equipment vendor"
+                    : "Select supplier / vendor"
+                }
               />
               {!form.supplierId ? (
                 <CField
                   label="…or type the supplier name"
                   value={form.supplier}
                   onChange={(v) => setForm({ ...form, supplier: v })}
-                  placeholder="If not in the master list"
+                  placeholder={kind === "tool" ? "Add vendors in Workers & Vendors" : "If not in the master list"}
                 />
               ) : (
                 <div className="field" />
@@ -376,7 +409,7 @@ export default function Purchases() {
                 step="0.001"
                 required
                 value={form.weight}
-                onChange={(v) => setForm({ ...form, weight: v })}
+                onChange={(v) => upd({ weight: v })}
               />
               <CSelect
                 label="Purity"
@@ -388,15 +421,9 @@ export default function Purchases() {
                 label="Rate per gram"
                 type="number"
                 value={form.rate}
-                onChange={(v) => setForm({ ...form, rate: v })}
+                onChange={(v) => upd({ rate: v })}
               />
-              <CField
-                label={`Amount (auto ${money(calc)})`}
-                type="number"
-                value={form.amount}
-                onChange={(v) => setForm({ ...form, amount: v })}
-                placeholder="Leave blank to use weight × rate"
-              />
+              {amountField}
             </>
           )}
 
@@ -443,10 +470,7 @@ export default function Purchases() {
                       className="icon-square danger"
                       disabled={form.pieces.length === 1}
                       onClick={() =>
-                        setForm({
-                          ...form,
-                          pieces: form.pieces.filter((_, n) => n !== i),
-                        })
+                        upd({ pieces: form.pieces.filter((_, n) => n !== i) })
                       }
                     >
                       ×
@@ -457,7 +481,7 @@ export default function Purchases() {
                   type="button"
                   className="add-line-btn"
                   onClick={() =>
-                    setForm({ ...form, pieces: [...form.pieces, blankPiece()] })
+                    upd({ pieces: [...form.pieces, blankPiece()] })
                   }
                 >
                   <Plus size={13} /> Add piece
@@ -472,16 +496,9 @@ export default function Purchases() {
                 label="Rate per gram (optional)"
                 type="number"
                 value={form.rate}
-                onChange={(v) => setForm({ ...form, rate: v })}
+                onChange={(v) => upd({ rate: v })}
               />
-              <CField
-                label={`Total amount (auto ${money(calc)})`}
-                type="number"
-                full
-                value={form.amount}
-                onChange={(v) => setForm({ ...form, amount: v })}
-                placeholder="Leave blank to use net weight × rate"
-              />
+              {amountField}
               <div className="calc-box">
                 <div>
                   <span>Pieces</span>
@@ -516,23 +533,16 @@ export default function Purchases() {
                 type="number"
                 required
                 value={form.quantity}
-                onChange={(v) => setForm({ ...form, quantity: v })}
+                onChange={(v) => upd({ quantity: v })}
               />
               <CField
                 label="Price per unit (₹)"
                 type="number"
                 step="0.01"
                 value={form.rate}
-                onChange={(v) => setForm({ ...form, rate: v })}
+                onChange={(v) => upd({ rate: v })}
               />
-              <CField
-                label={`Total amount (auto ${money(calc)})`}
-                type="number"
-                step="0.01"
-                value={form.amount}
-                onChange={(v) => setForm({ ...form, amount: v })}
-                placeholder="Leave blank to use quantity × price"
-              />
+              {amountField}
             </>
           )}
           <CField

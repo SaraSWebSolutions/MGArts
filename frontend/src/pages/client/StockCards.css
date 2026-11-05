@@ -1,0 +1,64 @@
+/* Stock ledger: coloured balance + summary cards (same palette as the dashboard KPIs) */
+.st-amber { --tone: #d99415; }
+.st-blue { --tone: #3b87e7; }
+.st-green { --tone: #0ca981; }
+.st-purple { --tone: #8c65d5; }
+.st-rose { --tone: #e35d70; }
+
+.bal-card[class*="st-"] {
+  position: relative;
+  border-color: color-mix(in srgb, var(--tone) 28%, var(--line));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--tone) 16%, var(--surface)),
+    var(--surface) 78%
+  );
+  overflow: hidden;
+}
+.bal-card[class*="st-"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--tone);
+}
+.bal-card[class*="st-"] small {
+  color: var(--tone);
+}
+.bal-card[class*="st-"] strong {
+  color: var(--ink);
+}
+
+.ledger-sum .sum-card {
+  position: relative;
+  padding: 12px 14px 12px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--line));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--tone) 15%, var(--surface)),
+    var(--surface) 80%
+  );
+  overflow: hidden;
+}
+.ledger-sum .sum-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--tone);
+}
+.ledger-sum .sum-card > span:first-child {
+  color: var(--tone);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.ledger-sum .sum-card strong {
+  display: block;
+  margin: 4px 0 2px;
+}

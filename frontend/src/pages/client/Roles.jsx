@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Pencil,
   Plus,
@@ -12,6 +12,10 @@ import { permissionsApi, rolesApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { Drawer, EmptyRow, Field, Stat } from "../../components/MasterUI";
 import { formValues } from "../../components/masterHelpers";
+import { Skeleton } from "../../components/Loaders";
+import Pagination from "../../components/Pagination";
+import { usePaged } from "../../hooks";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 /** Tick the permissions a role should have, then save them with POST /roles/:id/permissions */
@@ -74,8 +78,10 @@ function RolePermissions({ role, onClose }) {
       saveLabel="Save Permissions"
     >
       {loading && (
-        <div className="master-empty" style={{ gridColumn: "1/-1" }}>
-          Loading...
+        <div style={{ gridColumn: "1/-1" }} aria-busy="true">
+          {[90, 70, 82, 60, 76, 66].map((w, i) => (
+            <Skeleton key={i} width={`${w}%`} height={14} style={{ marginTop: i ? 20 : 0 }} />
+          ))}
         </div>
       )}
       {!loading && all.length === 0 && (
@@ -112,42 +118,21 @@ function RolePermissions({ role, onClose }) {
 }
 
 export default function Roles() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload: load,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => rolesApi.page(p), []);
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const [assigning, setAssigning] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      setRows(await rolesApi.list());
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to load roles"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
-  // useEffect(() => {
-  //   load();
-  // }, [load]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => {
-    void Promise.resolve().then(load);
-  }, []);
-
-  const filtered = useMemo(
-    () =>
-      rows.filter((r) =>
-        `${r.name}${r.description ?? ""}`
-          .toLowerCase()
-          .includes(q.toLowerCase()),
-      ),
-    [rows, q],
-  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -184,7 +169,7 @@ export default function Roles() {
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">ADMINISTRATION / ROLES</span>
+          <Breadcrumb />
           <h1>Roles</h1>
           <p>Create roles and choose which permissions each role has.</p>
         </div>
@@ -194,7 +179,12 @@ export default function Roles() {
       </header>
 
       <div className="master-stats">
-        <Stat icon={ShieldCheck} value={rows.length} label="Roles" />
+        <Stat
+          icon={ShieldCheck}
+          loading={!summary}
+          value={summary?.total ?? 0}
+          label="Roles"
+        />
       </div>
 
       <section className="master-card">
@@ -218,10 +208,10 @@ export default function Roles() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
-                <EmptyRow colSpan={3} loading={loading} />
+              {rows.length === 0 && (
+                <EmptyRow colSpan={3} loading={loading} rows={limit} />
               )}
-              {filtered.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -264,9 +254,14 @@ export default function Roles() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">
-          {filtered.length} of {rows.length} roles
-        </div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="roles"
+        />
       </section>
 
       {editing && (

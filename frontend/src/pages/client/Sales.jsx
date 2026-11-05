@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, Printer, Search, Store } from "lucide-react";
+import { Plus, Printer, Search, Store, Ban } from "lucide-react";
 import toast from "react-hot-toast";
 import { jewelleryApi, salesApi } from "../../services/endpoints";
 import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
-import { run, useList, useMasters } from "../../hooks";
-import {
-  Badge,
-  CField,
-  CSelect,
-  Drawer,
-  EmptyRow,
-  Stat,
-} from "../../components/MasterUI";
+import { run, usePaged, useMasters } from "../../hooks";
+import { Badge, CField, CSelect, Drawer, EmptyRow, Stat, ActionBtn } from "../../components/MasterUI";
+import Pagination from "../../components/Pagination";
 import {
   dt,
   isActive,
@@ -23,6 +17,7 @@ import {
 } from "../../components/masterHelpers";
 import PrintDoc from "../../components/PrintDoc";
 import TaxPicker from "../../components/TaxPicker";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 const blank = (taxIds) => ({
@@ -37,12 +32,22 @@ const blank = (taxIds) => ({
 export default function Sales() {
   const { can } = useAuth();
   const { taxRates } = useMasters();
-  const { rows, loading, reload } = useList(() => salesApi.list(), []);
+  const {
+    rows,
+    meta,
+    summary,
+    loading,
+    reload,
+    setPage,
+    limit,
+    setLimit,
+    q,
+    setQ,
+  } = usePaged((p) => salesApi.page(p), []);
   const [stock, setStock] = useState([]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [doc, setDoc] = useState(null);
-  const [q, setQ] = useState("");
 
   useEffect(() => {
     if (form)
@@ -96,16 +101,12 @@ export default function Sales() {
     )
       reload();
   };
-  const shown = rows.filter((r) =>
-    `${r.invoiceNo}${r.buyerName}`.toLowerCase().includes(q.toLowerCase()),
-  );
-  const active = rows.filter((r) => r.status === "active");
 
   return (
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">TRANSACTIONS / SALES</span>
+          <Breadcrumb />
           <h1>Own Jewellery Sales</h1>
           <p>
             Jewellery made from your own gold and sold from the shop. Customer
@@ -133,20 +134,22 @@ export default function Sales() {
         )}
       </header>
       <div className="master-stats">
-        <Stat icon={Store} value={active.length} label="Sales" />
         <Stat
           icon={Store}
-          value={money(active.reduce((s, r) => s + r.total, 0))}
+          loading={!summary}
+          value={summary?.count ?? 0}
+          label="Sales"
+        />
+        <Stat
+          icon={Store}
+          loading={!summary}
+          value={money(summary?.total)}
           label="Sales Value"
         />
         <Stat
           icon={Store}
-          value={wt(
-            active.reduce(
-              (s, r) => s + r.items.reduce((a, i) => a + i.weight, 0),
-              0,
-            ),
-          )}
+          loading={!summary}
+          value={wt(summary?.weight)}
           label="Weight Sold"
         />
       </div>
@@ -175,8 +178,10 @@ export default function Sales() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <EmptyRow colSpan={7} loading={loading} />}
-              {shown.map((r) => (
+              {rows.length === 0 && (
+                <EmptyRow colSpan={7} loading={loading} rows={limit} />
+              )}
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <div className="name-cell">
@@ -205,16 +210,11 @@ export default function Sales() {
                   </td>
                   <td>
                     <div className="action-buttons">
-                      <button className="icon-square" onClick={() => setDoc(r)}>
+                      <button className="icon-square" title="Print invoice" onClick={() => setDoc(r)}>
                         <Printer size={14} />
                       </button>
                       {can("sales-manage") && r.status === "active" && (
-                        <button
-                          className="act-text red"
-                          onClick={() => voidIt(r)}
-                        >
-                          Void
-                        </button>
+                        <ActionBtn icon={Ban} label="Void sale" tone="danger" onClick={() => voidIt(r)} />
                       )}
                     </div>
                   </td>
@@ -223,7 +223,14 @@ export default function Sales() {
             </tbody>
           </table>
         </div>
-        <div className="master-footer">{shown.length} sales</div>
+        <Pagination
+          meta={meta}
+          loading={loading}
+          limit={limit}
+          onPage={setPage}
+          onLimit={setLimit}
+          label="sales"
+        />
       </section>
 
       {form && (

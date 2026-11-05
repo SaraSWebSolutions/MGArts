@@ -1,0 +1,35 @@
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+}
+.crumb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.crumb-link:hover {
+  color: #b6740c;
+  background: #fff4df;
+}
+.crumb-sep {
+  color: #bec9d7;
+}
+.crumb-current {
+  color: var(--ink);
+  font-weight: 600;
+  padding: 2px 4px;
+}
+.master-head .crumbs {
+  margin-bottom: 6px;
+}

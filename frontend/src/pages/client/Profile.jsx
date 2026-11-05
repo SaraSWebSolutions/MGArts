@@ -5,6 +5,8 @@ import { getErrorMessage } from "../../services/api";
 import { useAuth } from "../../context/authContext";
 import { Drawer, Field } from "../../components/MasterUI";
 import { formValues, imageUrl } from "../../components/masterHelpers";
+import { Skeleton } from "../../components/Loaders";
+import Breadcrumb from "../../components/Breadcrumb";
 import "./Masters.css";
 
 // API response wrapper irundhalum illa-naalum profile object-a edukkum
@@ -60,7 +62,7 @@ export default function Profile() {
     <div className="master-page">
       <header className="master-head">
         <div>
-          <span className="master-eyebrow">ACCOUNT / PROFILE</span>
+          <Breadcrumb />
           <h1>My Profile</h1>
           <p>Update your name, contact number, photo and password.</p>
         </div>
@@ -73,8 +75,11 @@ export default function Profile() {
 
       <section className="master-card" style={{ maxWidth: 720 }}>
         {!profile ? (
-          <div className="master-empty" style={{ padding: 45 }}>
-            Loading...
+          <div style={{ padding: 26 }} aria-busy="true">
+            <Skeleton width={72} height={72} style={{ borderRadius: "50%" }} />
+            {[60, 78, 52, 70].map((w, i) => (
+              <Skeleton key={i} width={`${w}%`} height={14} style={{ marginTop: 22 }} />
+            ))}
           </div>
         ) : (
           <div className="drawer-body">

@@ -7,7 +7,7 @@ import "../pages/client/Masters.css";
 const Head = ({ s, title, no, date }) => (
   <>
     <header>
-      <img src="/assets/logo-horizontal.jpg" alt="MG Arts" />
+      <img src={s?.logo || "/assets/logo-horizontal.jpg"} alt={s?.shopName || "MG Arts"} />
       <div className="shop">
         <strong>{s?.shopName || "MG ARTS"}</strong>
         {s?.address && <div>{s.address}</div>}
@@ -200,9 +200,24 @@ function Invoice({ d, s }) {
         </tbody>
       </table>
       <div className="print-total">
+        {d.offerAmount > 0 && (
+          <>
+            <div>
+              <span>Making charge</span>
+              <span>{money(d.makingCharge)}</span>
+            </div>
+            <div>
+              <span>
+                Less: Offer
+                {d.offerType === "percent" ? ` (${d.offerValue}%)` : ""}
+              </span>
+              <span>− {money(d.offerAmount)}</span>
+            </div>
+          </>
+        )}
         <div>
           <span>Taxable value</span>
-          <span>{money(d.makingCharge)}</span>
+          <span>{money(d.taxableValue || d.makingCharge)}</span>
         </div>
         {taxList(d).map((t, i) => (
           <div key={i}>
